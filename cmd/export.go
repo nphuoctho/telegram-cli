@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gotd/td/tg"
 	"github.com/nphuoctho/telegram-cli/internal/config"
 	"github.com/nphuoctho/telegram-cli/internal/export"
 	"github.com/nphuoctho/telegram-cli/internal/output"
@@ -48,6 +49,11 @@ func newExportCmd() *cobra.Command {
 			if since != nil && until != nil && since.After(*until) {
 				return &config.UsageError{Msg: "--since is after --until"}
 			}
+			if outPath != "" {
+				if err := export.CheckOutput(outPath); err != nil {
+					return err
+				}
+			}
 			var sum struct {
 				Output   string `json:"output"`
 				Format   string `json:"format"`
@@ -64,16 +70,26 @@ func newExportCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
+				self := func() *tg.User {
+					u, err := s.Peers.Self(ctx)
+					if err != nil {
+						return nil
+					}
+					return u.Raw()
+				}
 				chat := export.ChatFromPeer(peer)
 				path := outPath
 				if path == "" {
 					path = export.Slug(chat) + "." + format
 				}
-				elems, err := export.Fetch(ctx, s.API, p, since, until, limit)
+				if err := export.CheckOutput(path); err != nil {
+					return err
+				}
+				elems, err := export.Fetch(ctx, s.API, p, since, until, limit, self)
 				if err != nil {
 					return err
 				}
-				msgs := export.Convert(elems)
+				msgs := export.Convert(elems, self)
 				sum.Output, sum.Format, sum.Messages = path, format, len(msgs)
 				if media {
 					dir := strings.TrimSuffix(path, filepath.Ext(path)) + "_media"

@@ -75,10 +75,22 @@ func ChatFromPeer(p peers.Peer) output.Chat {
 	return output.Chat{ID: id, Type: "group", Title: p.VisibleName()}
 }
 
+// CheckOutput rejects an output path that is an existing directory.
+func CheckOutput(path string) error {
+	if st, err := os.Stat(path); err == nil && st.IsDir() {
+		return &config.UsageError{Msg: path + " is a directory; --output must be a file"}
+	}
+	return nil
+}
+
 // Fetch reads history newest first from until (inclusive; nil = now) back to since,
 // keeping at most limit messages (0 = all).
-func Fetch(ctx context.Context, api *tg.Client, peer tg.InputPeerClass, since, until *time.Time, limit int) ([]messages.Elem, error) {
-	q := query.Messages(api).GetHistory(peer).BatchSize(100)
+func Fetch(ctx context.Context, api *tg.Client, peer tg.InputPeerClass, since, until *time.Time, limit int, self func() *tg.User) ([]messages.Elem, error) {
+	batch := 100
+	if limit > 0 {
+		batch = min(limit, batch)
+	}
+	q := query.Messages(api).GetHistory(peer).BatchSize(batch)
 	if until != nil {
 		q = q.OffsetDate(int(until.Unix()) + 1) // offset date is exclusive
 	}
@@ -89,6 +101,9 @@ func Fetch(ctx context.Context, api *tg.Client, peer tg.InputPeerClass, since, u
 		if since != nil && int64(e.Msg.GetDate()) < since.Unix() {
 			break
 		}
+		if _, ok := output.NewMessage(e, self); !ok {
+			continue
+		}
 		out = append(out, e)
 		if limit > 0 && len(out) >= limit {
 			break
@@ -98,15 +113,15 @@ func Fetch(ctx context.Context, api *tg.Client, peer tg.InputPeerClass, since, u
 }
 
 // Convert turns fetched elements (newest first) into messages, oldest first.
-func Convert(elems []messages.Elem) []output.Message {
+func Convert(elems []messages.Elem, self func() *tg.User) []output.Message {
 	out := make([]output.Message, len(elems))
 	for i, e := range elems {
-		out[len(elems)-1-i] = output.NewMessage(e)
+		out[len(elems)-1-i], _ = output.NewMessage(e, self) // Fetch already dropped non-messages
 	}
 	return out
 }
 
-// DownloadMedia saves each attachment into dir and sets File (relative to relDir's
+// DownloadMedia saves each attachment into dir and sets File (relative to dir's
 // parent) on the matching message. elems are newest first, msgs oldest first (see Convert).
 // Failures are warnings; the number of files present is returned.
 func DownloadMedia(ctx context.Context, api *tg.Client, elems []messages.Elem, msgs []output.Message, dir string, warn io.Writer) (int, error) {
@@ -119,9 +134,9 @@ func DownloadMedia(ctx context.Context, api *tg.Client, elems []messages.Elem, m
 		}
 		name := fmt.Sprintf("%d_%s", m.ID, tgclient.SafeName(f.Name))
 		target := filepath.Join(dir, name)
-		err := os.MkdirAll(dir, 0o755)
+		err := os.MkdirAll(dir, 0o700)
 		if err == nil {
-			err = tgclient.DownloadTo(ctx, api, f.Location, m.Media.Size, target, false, nil)
+			err = tgclient.DownloadTo(ctx, api, f.Location, m.Media.Size, target, 0o600, false, nil)
 		}
 		switch {
 		case err == nil || errors.Is(err, tgclient.ErrSkipped):

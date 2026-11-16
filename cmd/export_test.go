@@ -170,3 +170,62 @@ func TestExportMediaDownloadsOnceAndWarnsOnFailure(t *testing.T) {
 	require.Equal(t, 0, code, errS)
 	require.Contains(t, out, "(2 files)")
 }
+
+func TestExportMultiPageStopsMidSecondPage(t *testing.T) {
+	setup(t)
+	chdir(t)
+	m := tgmock.NewRequire(t)
+	expectSelf(m)
+	var page1 []*tg.Message
+	for id := 102; id > 2; id-- {
+		page1 = append(page1, dated(id, 5, "x"))
+	}
+	expectHistory(t, m, func(r *tg.MessagesGetHistoryRequest) { require.Equal(t, 100, r.Limit) }, &tg.MessagesMessagesSlice{Count: 102, Messages: msgClasses(page1), Users: alice().Elems})
+	expectHistory(t, m, func(r *tg.MessagesGetHistoryRequest) { require.Equal(t, 100, r.Limit) },
+		msgs(dated(2, 3, "y"), dated(1, 1, "old")))
+	useMock(t, m)
+	code, out, errS := exec(t, "", "export", "me", "--since", "2025-11-02")
+	require.Equal(t, 0, code, errS)
+	require.Contains(t, out, "Exported 101 messages")
+}
+
+func TestExportNestedOutputWithMedia(t *testing.T) {
+	setup(t)
+	dir := chdir(t)
+	m := tgmock.NewRequire(t)
+	expectSelf(m)
+	expectHistory(t, m, func(*tg.MessagesGetHistoryRequest) {}, msgs(mediaMsg(1)))
+	m.ExpectFunc(func(b bin.Encoder) { require.IsType(t, &tg.UploadGetFileRequest{}, b) }).
+		ThenResult(&tg.UploadFile{Type: &tg.StorageFileUnknown{}, Bytes: []byte("abc")})
+	useMock(t, m)
+	code, out, errS := exec(t, "", "export", "me", "--media", "--output", "sub/x.md", "--format", "md", "--json")
+	require.Equal(t, 0, code, errS)
+	require.JSONEq(t, `{"output":"sub/x.md","format":"md","messages":1,"files":1,"media_dir":"sub/x_media"}`, out)
+	ents, err := os.ReadDir(filepath.Join(dir, "sub", "x_media"))
+	require.NoError(t, err)
+	require.Len(t, ents, 1)
+	st, err := os.Stat(filepath.Join(dir, "sub", "x_media"))
+	require.NoError(t, err)
+	require.Equal(t, os.FileMode(0o700), st.Mode().Perm())
+	fi, err := ents[0].Info()
+	require.NoError(t, err)
+	require.Equal(t, os.FileMode(0o600), fi.Mode().Perm())
+	b, _ := os.ReadFile(filepath.Join(dir, "sub", "x.md"))
+	require.Contains(t, string(b), "](x_media/1_")
+}
+
+func TestExportOutputDirectoryExit2BeforeFetch(t *testing.T) {
+	setup(t)
+	dir := chdir(t)
+	require.NoError(t, os.Mkdir(filepath.Join(dir, "d"), 0o755))
+	useMock(t, tgmock.NewRequire(t)) // any request would fail the test
+	code, _, errS := exec(t, "", "export", "me", "--output", "d")
+	require.Equal(t, 2, code, errS)
+}
+
+func msgClasses(ms []*tg.Message) (r []tg.MessageClass) {
+	for _, m := range ms {
+		r = append(r, m)
+	}
+	return r
+}

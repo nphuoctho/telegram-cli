@@ -78,7 +78,7 @@ func newDownloadCmd() *cobra.Command {
 							total = v.Media.Size
 						}
 						pr := output.NewProgress(c.ErrOrStderr(), filepath.Base(target))
-						err := tgclient.DownloadTo(ctx, s.API, f.Location, total, target, overwrite, pr.Update)
+						err := tgclient.DownloadTo(ctx, s.API, f.Location, total, target, 0o644, overwrite, pr.Update)
 						pr.Done()
 						r.Path = target
 						switch {
