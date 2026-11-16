@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"time"
 
 	"github.com/gotd/td/clock"
@@ -16,6 +17,7 @@ import (
 	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/telegram/auth"
 	"github.com/gotd/td/telegram/peers"
+	"github.com/gotd/td/telegram/updates"
 	"github.com/gotd/td/tg"
 	"github.com/nphuoctho/telegram-cli/internal/config"
 )
@@ -45,8 +47,12 @@ type Options struct {
 	// NeedAuth requires an existing session file (else AuthRequiredError, no
 	// network) and verifies it with Peers.Init before running the callback.
 	NeedAuth bool
+	// Dispatcher, when set, switches to watch mode: updates are delivered to
+	// it after fn returns, and Run blocks until ctx is cancelled.
+	Dispatcher *tg.UpdateDispatcher
 
-	peerStorage peers.Storage // nil = in memory; set by Run
+	peerStorage peers.Storage                    // nil = in memory; set by Run
+	hook        *atomic.Pointer[updates.Manager] // watch mode update handler; set by Run
 }
 
 // SessionPath returns <dataDir>/session.json.
@@ -71,7 +77,10 @@ func start(ctx context.Context, o Options, api *tg.Client, authc LoginClient, fn
 			return err
 		}
 	}
-	return fn(ctx, s)
+	if err := fn(ctx, s); err != nil || o.Dispatcher == nil {
+		return err
+	}
+	return watch(ctx, s, o.Dispatcher, o.hook)
 }
 
 // fixMode makes the session file private; gotd only sets 0600 when it creates the file.
@@ -96,10 +105,24 @@ func Run(ctx context.Context, o Options, fn func(context.Context, *Session) erro
 		// auth login/logout must work even with a corrupt cache (logout deletes it).
 		store = &PeerStore{path: PeersPath(o.DataDir), data: map[peers.Key]int64{}}
 	}
+	// Watch mode: the update manager needs the peer manager, which needs the
+	// client, so the handler is bound late. Updates before that are dropped.
+	hook := &atomic.Pointer[updates.Manager]{}
+	o.hook = hook
+	var handler telegram.UpdateHandler
+	if o.Dispatcher != nil {
+		handler = telegram.UpdateHandlerFunc(func(ctx context.Context, u tg.UpdatesClass) error {
+			if m := hook.Load(); m != nil {
+				return m.Handle(ctx, u)
+			}
+			return nil
+		})
+	}
 	o.peerStorage = store
 	client := telegram.NewClient(o.APIID, o.APIHash, telegram.Options{
 		SessionStorage: &session.FileStorage{Path: path},
-		NoUpdates:      true,
+		NoUpdates:      o.Dispatcher == nil,
+		UpdateHandler:  handler,
 		Clock:          o.Clock,
 		Device:         telegram.DeviceConfig{DeviceModel: "telegram-cli " + o.Version, AppVersion: o.Version},
 		Middlewares:    []telegram.Middleware{FloodWait(o.MaxFloodWait, o.Clock, o.Stderr)},
@@ -151,4 +174,16 @@ func ConfigOptions(r config.Resolved, cfg config.Config, stderr io.Writer, versi
 		return Options{}, err
 	}
 	return Options{APIID: r.APIID, APIHash: r.APIHash, DataDir: dir, MaxFloodWait: max, Stderr: stderr, Version: version}, nil
+}
+
+// watch streams updates into d until ctx is cancelled.
+func watch(ctx context.Context, s *Session, d *tg.UpdateDispatcher, hook *atomic.Pointer[updates.Manager]) error {
+	self, err := s.Peers.Self(ctx)
+	if err != nil {
+		return err
+	}
+	m := updates.New(updates.Config{Handler: s.Peers.UpdateHook(d), AccessHasher: s.Peers})
+	hook.Store(m)
+	// Forget: start from "now", no catch-up of missed messages.
+	return m.Run(ctx, s.API, self.ID(), updates.AuthOptions{Forget: true})
 }

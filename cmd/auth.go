@@ -18,6 +18,11 @@ import (
 
 // runTelegram is the seam tests replace with a mock-backed session.
 var runTelegram = func(ctx context.Context, c *cobra.Command, needAuth bool, fn func(context.Context, *tgclient.Session) error) error {
+	return runTelegramOpts(ctx, c, needAuth, nil, fn)
+}
+
+// runTelegramOpts is runTelegram; a non-nil d enables watch mode.
+func runTelegramOpts(ctx context.Context, c *cobra.Command, needAuth bool, d *tg.UpdateDispatcher, fn func(context.Context, *tgclient.Session) error) error {
 	r, err := config.Resolve()
 	if err != nil {
 		return err
@@ -31,6 +36,7 @@ var runTelegram = func(ctx context.Context, c *cobra.Command, needAuth bool, fn 
 		return err
 	}
 	o.NeedAuth = needAuth
+	o.Dispatcher = d
 	return tgclient.Run(ctx, o, fn)
 }
 

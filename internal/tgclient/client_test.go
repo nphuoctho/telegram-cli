@@ -5,8 +5,11 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/gotd/td/telegram/updates"
 	"github.com/gotd/td/tg"
 	"github.com/gotd/td/tgmock"
 	"github.com/stretchr/testify/require"
@@ -75,4 +78,28 @@ func TestFixMode(t *testing.T) {
 	st, _ := os.Stat(p)
 	require.Equal(t, os.FileMode(0o600), st.Mode().Perm())
 	require.NoError(t, fixMode(filepath.Join(t.TempDir(), "missing")))
+}
+
+func TestStartWatchBlocksUntilCancelThenCanceled(t *testing.T) {
+	m := tgmock.NewRequire(t)
+	m.ExpectCall(selfReq).ThenResult(&tg.UserClassVector{Elems: []tg.UserClass{&tg.User{ID: 1, Self: true}}})
+	m.ExpectCall(&tg.UpdatesGetStateRequest{}).ThenResult(&tg.UpdatesState{Pts: 1, Qts: 1, Date: 1, Seq: 1})
+	m.Expect().ThenResult(&tg.UpdatesDifferenceEmpty{Date: 1, Seq: 1}) // initial catch-up
+	ctx, cancel := context.WithCancel(context.Background())
+	d := tg.NewUpdateDispatcher()
+	hook := &atomic.Pointer[updates.Manager]{}
+	done := make(chan error, 1)
+	go func() {
+		done <- start(ctx, Options{NeedAuth: true, Dispatcher: &d, hook: hook}, tg.NewClient(m), nil,
+			func(context.Context, *Session) error { return nil })
+	}()
+	require.Eventually(t, func() bool { return hook.Load() != nil }, time.Second, time.Millisecond)
+	select {
+	case err := <-done:
+		t.Fatalf("returned before cancel: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	cancel()
+	err := <-done
+	require.ErrorIs(t, MapError(err), context.Canceled)
 }

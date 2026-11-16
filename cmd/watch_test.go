@@ -1,0 +1,251 @@
+package cmd
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"strings"
+	"testing"
+
+	"github.com/gotd/td/bin"
+	"github.com/gotd/td/telegram/peers"
+	"github.com/gotd/td/tg"
+	"github.com/gotd/td/tgmock"
+	"github.com/spf13/cobra"
+	"github.com/stretchr/testify/require"
+
+	"github.com/nphuoctho/telegram-cli/internal/tgclient"
+)
+
+func channelMsg(id int, text string) *tg.UpdateNewChannelMessage {
+	return &tg.UpdateNewChannelMessage{Message: &tg.Message{
+		ID: id, Date: 1763276525, Message: text, PeerID: &tg.PeerChannel{ChannelID: 77},
+		FromID: &tg.PeerUser{UserID: 123456789},
+	}}
+}
+
+func feed(t *testing.T, d *tg.UpdateDispatcher, ups ...tg.UpdateClass) {
+	err := d.Handle(context.Background(), &tg.Updates{
+		Updates: ups,
+		Users:   []tg.UserClass{alice().Elems[0]},
+		Chats:   []tg.ChatClass{&tg.Channel{ID: 77, Title: "Gophers"}},
+	})
+	require.NoError(t, err)
+}
+
+// fakeWatch replaces the Telegram connection: after fn, it feeds updates and cancels.
+func fakeWatch(t *testing.T, cancel context.CancelFunc, ups ...tg.UpdateClass) {
+	old := runWatch
+	t.Cleanup(func() { runWatch = old })
+	runWatch = func(ctx context.Context, _ *cobra.Command, d *tg.UpdateDispatcher, fn func(context.Context, *tgclient.Session) error) error {
+		if err := fn(ctx, nil); err != nil {
+			return err
+		}
+		feed(t, d, ups...)
+		cancel()
+		return ctx.Err()
+	}
+}
+
+func runCancelable(t *testing.T, cancel context.CancelFunc, ctx context.Context, args ...string) (int, string, string) {
+	root := newRootCmd()
+	var out, errB bytes.Buffer
+	root.SetArgs(args)
+	root.SetOut(&out)
+	root.SetErr(&errB)
+	code := run(ctx, root, &errB)
+	return code, out.String(), errB.String()
+}
+
+func twoUpdates() []tg.UpdateClass {
+	return []tg.UpdateClass{
+		&tg.UpdateNewMessage{Message: textMsg(5, "hi")},
+		channelMsg(6, "hello group"),
+	}
+}
+
+func TestWatchReadableTwoMessagesExit0(t *testing.T) {
+	setup(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	fakeWatch(t, cancel, twoUpdates()...)
+	code, out, errS := runCancelable(t, cancel, ctx, "watch")
+	require.Equal(t, 0, code, errS)
+	require.Empty(t, errS)
+	require.Equal(t, "[Alice Liddell]\n#5  2025-11-16 07:02  Alice Liddell (@alice)\n  hi\n"+
+		"[Gophers]\n#6  2025-11-16 07:02  Alice Liddell (@alice)\n  hello group\n", out)
+}
+
+func TestWatchJSONLines(t *testing.T) {
+	setup(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	fakeWatch(t, cancel, twoUpdates()...)
+	code, out, errS := runCancelable(t, cancel, ctx, "watch", "--json")
+	require.Equal(t, 0, code, errS)
+	lines := strings.Split(strings.TrimSuffix(out, "\n"), "\n")
+	require.Len(t, lines, 2)
+	var m map[string]any
+	require.NoError(t, json.Unmarshal([]byte(lines[1]), &m))
+	require.Equal(t, "hello group", m["text"])
+	require.EqualValues(t, -1000000000077, m["chat_id"])
+}
+
+func TestWatchFilterDropsOtherChats(t *testing.T) {
+	setup(t)
+	m := tgmock.NewRequire(t)
+	m.ExpectCall(selfReq).ThenResult(alice())
+	useMock(t, m)
+	ctx, cancel := context.WithCancel(context.Background())
+	old := runWatch
+	t.Cleanup(func() { runWatch = old })
+	runWatch = func(ctx context.Context, _ *cobra.Command, d *tg.UpdateDispatcher, fn func(context.Context, *tgclient.Session) error) error {
+		// "me" resolves to self (alice's ID); reuse the mocked session.
+		if err := runTelegram(ctx, nil, true, fn); err != nil {
+			return err
+		}
+		feed(t, d, twoUpdates()...)
+		cancel()
+		return ctx.Err()
+	}
+	code, out, errS := runCancelable(t, cancel, ctx, "watch", "me", "--json")
+	require.Equal(t, 0, code, errS)
+	require.Equal(t, 1, strings.Count(out, "\n"), out)
+	require.Contains(t, out, `"text":"hi"`)
+}
+
+// sessionOver builds a Session on api.
+func sessionOver(api tg.Invoker) *tgclient.Session {
+	c := tg.NewClient(api)
+	return &tgclient.Session{API: c, Peers: peers.Options{}.Build(c)}
+}
+
+func TestWatchFilterChannel(t *testing.T) {
+	setup(t)
+	m := tgmock.NewRequire(t)
+	m.ExpectFunc(func(b bin.Encoder) {
+		r, ok := b.(*tg.ContactsResolveUsernameRequest)
+		require.True(t, ok, "got %T", b)
+		require.Equal(t, "gophers", r.Username)
+	}).ThenResult(&tg.ContactsResolvedPeer{
+		Peer:  &tg.PeerChannel{ChannelID: 77},
+		Chats: []tg.ChatClass{&tg.Channel{ID: 77, AccessHash: 5, Title: "Gophers", Username: "gophers", Photo: &tg.ChatPhotoEmpty{}}},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	old := runWatch
+	t.Cleanup(func() { runWatch = old })
+	runWatch = func(ctx context.Context, _ *cobra.Command, d *tg.UpdateDispatcher, fn func(context.Context, *tgclient.Session) error) error {
+		if err := fn(ctx, sessionOver(m)); err != nil {
+			return err
+		}
+		feed(t, d, twoUpdates()...)
+		cancel()
+		return ctx.Err()
+	}
+	code, out, errS := runCancelable(t, cancel, ctx, "watch", "@gophers", "--json")
+	require.Equal(t, 0, code, errS)
+	require.Equal(t, 1, strings.Count(out, "\n"), out)
+	require.Contains(t, out, `"text":"hello group"`)
+}
+
+type cancelInvoker struct{}
+
+func (cancelInvoker) Invoke(context.Context, bin.Encoder, bin.Decoder) error {
+	return context.Canceled
+}
+
+func TestWatchCtrlCDuringChatResolutionExits0(t *testing.T) {
+	setup(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	old := runWatch
+	t.Cleanup(func() { runWatch = old })
+	runWatch = func(ctx context.Context, _ *cobra.Command, _ *tg.UpdateDispatcher, fn func(context.Context, *tgclient.Session) error) error {
+		cancel()
+		return tgclient.MapError(fn(ctx, sessionOver(cancelInvoker{})))
+	}
+	code, out, errS := runCancelable(t, cancel, ctx, "watch", "@gophers")
+	require.Equal(t, 0, code, errS)
+	require.Empty(t, out+errS)
+}
+
+func TestWatchSanitisesUntrustedText(t *testing.T) {
+	setup(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	old := runWatch
+	t.Cleanup(func() { runWatch = old })
+	runWatch = func(ctx context.Context, _ *cobra.Command, d *tg.UpdateDispatcher, fn func(context.Context, *tgclient.Session) error) error {
+		_ = fn(ctx, nil)
+		err := d.Handle(ctx, &tg.Updates{
+			Updates: []tg.UpdateClass{&tg.UpdateNewChannelMessage{Message: &tg.Message{
+				ID: 6, Date: 1763276525, Message: "x\x1b[2Jhi", PeerID: &tg.PeerChannel{ChannelID: 77},
+				FromID: &tg.PeerUser{UserID: 5},
+			}}},
+			Users: []tg.UserClass{&tg.User{ID: 5, FirstName: "Bob\x1b]0;pwn\a", AccessHash: 1}},
+			Chats: []tg.ChatClass{&tg.Channel{ID: 77, Title: "Evil\x1b]0;pwn\x07\nFAKE", Photo: &tg.ChatPhotoEmpty{}}},
+		})
+		require.NoError(t, err)
+		cancel()
+		return ctx.Err()
+	}
+	code, out, errS := runCancelable(t, cancel, ctx, "watch")
+	require.Equal(t, 0, code, errS)
+	require.NotContains(t, out, "\x1b")
+	require.NotContains(t, out, "\a")
+	require.True(t, strings.HasPrefix(out, "[Evil"), out)
+	require.Equal(t, 1, strings.Count(strings.SplitN(out, "#6", 2)[0], "\n"), out) // header is one line
+}
+
+func TestWatchBadFlagExit2(t *testing.T) {
+	setup(t)
+	code, _, _ := exec(t, "", "watch", "--bogus")
+	require.Equal(t, 2, code)
+}
+
+func TestWatchOutgoingPrivateMessageHasSelfSender(t *testing.T) {
+	setup(t)
+	m := tgmock.NewRequire(t)
+	m.ExpectCall(selfReq).ThenResult(alice())
+	ctx, cancel := context.WithCancel(context.Background())
+	old := runWatch
+	t.Cleanup(func() { runWatch = old })
+	runWatch = func(ctx context.Context, _ *cobra.Command, d *tg.UpdateDispatcher, fn func(context.Context, *tgclient.Session) error) error {
+		s := sessionOver(m)
+		require.NoError(t, s.Peers.Init(ctx))
+		if err := fn(ctx, s); err != nil {
+			return err
+		}
+		feed(t, d, &tg.UpdateNewMessage{Message: &tg.Message{
+			ID: 9, Date: 1763276525, Message: "mine", Out: true, PeerID: &tg.PeerUser{UserID: 42},
+		}})
+		cancel()
+		return ctx.Err()
+	}
+	code, out, errS := runCancelable(t, cancel, ctx, "watch", "--json")
+	require.Equal(t, 0, code, errS)
+	require.Contains(t, out, `"from":{"id":123456789,"name":"Alice Liddell","username":"alice"}`)
+	require.Contains(t, out, `"out":true`)
+}
+
+type brokenPipe struct{}
+
+func (brokenPipe) Write([]byte) (int, error) { return 0, errors.New("write: broken pipe") }
+
+func TestWatchClosedStdoutStopsCleanly(t *testing.T) {
+	for _, args := range [][]string{{"watch"}, {"watch", "--json"}} {
+		setup(t)
+		old := runWatch
+		runWatch = func(ctx context.Context, _ *cobra.Command, d *tg.UpdateDispatcher, fn func(context.Context, *tgclient.Session) error) error {
+			_ = fn(ctx, nil)
+			feed(t, d, twoUpdates()...)
+			<-ctx.Done() // only the write failure can end the watch
+			return ctx.Err()
+		}
+		root := newRootCmd()
+		var errB bytes.Buffer
+		root.SetArgs(args)
+		root.SetOut(brokenPipe{})
+		root.SetErr(&errB)
+		require.Equal(t, 0, run(context.Background(), root, &errB), errB.String())
+		require.Empty(t, errB.String())
+		runWatch = old
+	}
+}
