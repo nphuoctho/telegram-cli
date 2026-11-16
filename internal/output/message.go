@@ -199,12 +199,12 @@ func PrintMessages(w io.Writer, msgs []Message) {
 	for _, m := range msgs {
 		fmt.Fprintf(w, "#%d  %s", m.ID, m.Date.Local().Format("2006-01-02 15:04"))
 		if f := m.From; f != nil {
-			name := clean(f.Name)
+			name := cleanLine(f.Name)
 			if name == "" {
 				name = fmt.Sprintf("id %d", f.ID)
 			}
 			if f.Username != "" {
-				name += " (@" + clean(f.Username) + ")"
+				name += " (@" + cleanLine(f.Username) + ")"
 			}
 			fmt.Fprintf(w, "  %s", name)
 		}
@@ -213,16 +213,16 @@ func PrintMessages(w io.Writer, msgs []Message) {
 		}
 		fmt.Fprintln(w)
 		if m.Service {
-			fmt.Fprintf(w, "  * %s\n", clean(m.Text))
+			fmt.Fprintf(w, "  * %s\n", cleanLine(m.Text))
 		} else if m.Text != "" {
 			for _, l := range strings.Split(clean(m.Text), "\n") {
 				fmt.Fprintf(w, "  %s\n", l)
 			}
 		}
 		if md := m.Media; md != nil {
-			line := "[" + clean(md.Type) + "]"
+			line := "[" + cleanLine(md.Type) + "]"
 			if md.FileName != "" {
-				line += " " + clean(md.FileName)
+				line += " " + cleanLine(md.FileName)
 			}
 			if md.Size > 0 {
 				line += " (" + Size(md.Size) + ")"
@@ -230,4 +230,14 @@ func PrintMessages(w io.Writer, msgs []Message) {
 			fmt.Fprintf(w, "  %s\n", line)
 		}
 	}
+}
+
+// cleanLine is clean for single-line fields: newlines and tabs are replaced too.
+func cleanLine(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return '\uFFFD'
+		}
+		return r
+	}, s)
 }

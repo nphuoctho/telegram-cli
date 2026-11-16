@@ -37,9 +37,8 @@ var notFoundRPC = []string{
 }
 
 // IsNotFound reports whether err means the chat does not exist or is not accessible.
-func IsNotFound(err error) bool { return isNotFound(err) }
 
-func isNotFound(err error) bool {
+func IsNotFound(err error) bool {
 	var pnf *peers.PeerNotFoundError
 	var phn *peers.PhoneNotFoundError
 	if errors.As(err, &pnf) || errors.As(err, &phn) {
@@ -62,7 +61,7 @@ func ResolveChat(ctx context.Context, api *tg.Client, m *peers.Manager, arg stri
 	if !numericID.MatchString(arg) {
 		p, err := m.Resolve(ctx, arg)
 		if err != nil {
-			if isNotFound(err) {
+			if IsNotFound(err) {
 				return nil, NotFound(arg)
 			}
 			return nil, err
@@ -76,14 +75,14 @@ func ResolveChat(ctx context.Context, api *tg.Client, m *peers.Manager, arg stri
 		return nil, notFound
 	}
 	p, err := m.ResolveTDLibID(ctx, id)
-	if err != nil && isNotFound(err) {
+	if err != nil && IsNotFound(err) {
 		if werr := WalkDialogs(ctx, api, m); werr != nil {
 			return nil, werr
 		}
 		p, err = m.ResolveTDLibID(ctx, id)
 	}
 	if err != nil {
-		if isNotFound(err) {
+		if IsNotFound(err) {
 			return nil, notFound
 		}
 		return nil, err
