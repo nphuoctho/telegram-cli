@@ -109,17 +109,19 @@ func newDownloadCmd() *cobra.Command {
 				}
 				return nil
 			})
-			if err != nil {
-				return err
-			}
 			failed := 0
 			for _, r := range results {
 				if r.Status == "error" {
 					failed++
 				}
 			}
+			// Files saved before a fatal error are on disk; report them too.
 			if jsonMode(c) {
-				err = output.JSON(c.OutOrStdout(), results)
+				if len(results) > 0 {
+					if jerr := output.JSON(c.OutOrStdout(), results); err == nil {
+						err = jerr
+					}
+				}
 			} else {
 				printDownloads(c, results)
 			}
@@ -143,7 +145,7 @@ func printDownloads(c *cobra.Command, rs []downloadResult) {
 		case "skipped":
 			fmt.Fprintf(w, "skipped  %s  (exists)\n", r.Path)
 		default:
-			fmt.Fprintf(w, "error    message %d: %s\n", r.MessageID, r.Error)
+			fmt.Fprintf(w, "error    message %d: %s\n", r.MessageID, output.CleanLine(r.Error))
 		}
 	}
 }

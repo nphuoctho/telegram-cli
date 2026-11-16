@@ -18,6 +18,7 @@ import (
 	"github.com/gotd/td/telegram/uploader"
 	"github.com/gotd/td/tg"
 	"github.com/nphuoctho/telegram-cli/internal/config"
+	"github.com/nphuoctho/telegram-cli/internal/output"
 )
 
 const (
@@ -92,13 +93,16 @@ func PlanUploads(paths []string, as string) ([]UploadPlan, error) {
 	for _, p := range paths {
 		st, err := os.Stat(p)
 		if err != nil {
-			return nil, &config.UsageError{Msg: fmt.Sprintf("cannot upload %s: %v", p, errors.Unwrap(err))}
+			return nil, &config.UsageError{Msg: fmt.Sprintf("cannot upload %s: %v", output.CleanLine(p), errors.Unwrap(err))}
 		}
 		if !st.Mode().IsRegular() {
-			return nil, &config.UsageError{Msg: p + " is not a regular file"}
+			return nil, &config.UsageError{Msg: output.CleanLine(p) + " is not a regular file"}
+		}
+		if st.Size() == 0 {
+			return nil, &config.UsageError{Msg: output.CleanLine(p) + " is empty"}
 		}
 		if st.Size() > MaxUploadSizePremium {
-			return nil, tooLarge(MaxUploadSizePremium)
+			return nil, tooLarge(MaxUploadSize, "limit %d MiB, %d MiB for Premium")
 		}
 		kind, err := ChooseKind(p, st.Size(), as)
 		if err != nil {
@@ -109,8 +113,8 @@ func PlanUploads(paths []string, as string) ([]UploadPlan, error) {
 	return plans, nil
 }
 
-func tooLarge(limit int64) error {
-	return &config.UsageError{Msg: fmt.Sprintf("file too large (limit %d MiB)", limit>>20)}
+func tooLarge(limit int64, format string) error {
+	return &config.UsageError{Msg: fmt.Sprintf("file too large ("+format+")", limit>>20, MaxUploadSizePremium>>20)}
 }
 
 // CheckPremiumLimit asks Telegram for the account type, but only when a file
@@ -129,7 +133,7 @@ func CheckPremiumLimit(ctx context.Context, api *tg.Client, plans []UploadPlan) 
 				return nil
 			}
 		}
-		return tooLarge(MaxUploadSize)
+		return tooLarge(MaxUploadSize, "limit %d MiB")
 	}
 	return nil
 }

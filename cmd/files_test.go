@@ -139,7 +139,12 @@ func TestUploadRejectsBeforeNetwork(t *testing.T) {
 	require.NoError(t, f.Close())
 	code, _, errS = exec(t, "", "upload", "me", huge)
 	require.Equal(t, 2, code)
-	require.Contains(t, errS, "file too large (limit 4000 MiB)")
+	require.Contains(t, errS, "file too large (limit 2000 MiB, 4000 MiB for Premium)")
+	empty := filepath.Join(dir, "empty.txt")
+	require.NoError(t, os.WriteFile(empty, nil, 0o600))
+	code, _, errS = exec(t, "", "upload", "me", empty)
+	require.Equal(t, 2, code)
+	require.Contains(t, errS, "is empty")
 	code, _, _ = exec(t, "", "upload", "me", dir)
 	require.Equal(t, 2, code)
 	code, _, _ = exec(t, "", "upload", "me", filepath.Join(dir, "missing"))
@@ -292,4 +297,34 @@ func TestDownloadCreatesDir(t *testing.T) {
 	code, _, errS := exec(t, "", "download", "me", "5", "--dir", dir)
 	require.Equal(t, 0, code, errS)
 	require.FileExists(t, filepath.Join(dir, "5_a.pdf"))
+}
+
+func TestSendStripsControlCharsFromName(t *testing.T) {
+	setup(t)
+	m := tgmock.NewRequire(t)
+	u := alice().Elems[0].(*tg.User)
+	u.FirstName, u.LastName, u.Username = "x\x1b]0;pwn\x07\rA\x9d", "", "u\x1b"
+	m.ExpectCall(&tg.UsersGetUsersRequest{ID: []tg.InputUserClass{&tg.InputUserSelf{}}}).
+		ThenResult(&tg.UserClassVector{Elems: []tg.UserClass{u}})
+	expectSend(t, m, func(*tg.MessagesSendMessageRequest) {}, &tg.UpdateShortSentMessage{ID: 1})
+	useMock(t, m)
+	code, out, errS := exec(t, "", "send", "me", "x")
+	require.Equal(t, 0, code, errS)
+	for _, bad := range []string{"\x1b", "\r", "\x07", "\x9d"} {
+		require.NotContains(t, out, bad)
+	}
+	require.True(t, strings.HasPrefix(out, "Sent message 1 to "))
+}
+
+func TestDownloadFatalErrorKeepsSavedResults(t *testing.T) {
+	setup(t)
+	dir := t.TempDir()
+	m := tgmock.NewRequire(t)
+	expectGetMessages(m, docMsg(5, "a.pdf", 3), docMsg(6, "b.pdf", 3))
+	m.ExpectFunc(func(bin.Encoder) {}).ThenResult(&tg.UploadFile{Type: &tg.StorageFileUnknown{}, Bytes: []byte("abc")})
+	m.ExpectFunc(func(bin.Encoder) {}).ThenUnregistered()
+	useMock(t, m)
+	code, out, _ := exec(t, "", "download", "me", "5", "6", "--dir", dir, "--json")
+	require.Equal(t, 4, code)
+	require.Contains(t, out, `"message_id":5,"status":"saved"`)
 }

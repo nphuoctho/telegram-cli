@@ -49,11 +49,11 @@ func newUploadCmd() *cobra.Command {
 					id, err := tgclient.SendFile(ctx, s.API, p, pl, caption, pr.Update)
 					pr.Done()
 					if err != nil {
-						return fmt.Errorf("upload %s: %w", pl.Path, err)
+						return fmt.Errorf("upload %s: %w", output.CleanLine(pl.Path), err)
 					}
 					results = append(results, uploadResult{pl.Path, pl.Size, pl.As, id, chatID})
 					if !jsonMode(c) {
-						fmt.Fprintf(c.OutOrStdout(), "%s  %s  sent as %s  message %d\n", pl.Path, output.Size(pl.Size), pl.As, id)
+						fmt.Fprintf(c.OutOrStdout(), "%s  %s  sent as %s  message %d\n", output.CleanLine(pl.Path), output.Size(pl.Size), pl.As, id)
 					}
 				}
 				return nil
