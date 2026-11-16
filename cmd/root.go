@@ -13,6 +13,7 @@ import (
 
 	"github.com/nphuoctho/telegram-cli/internal/config"
 	"github.com/nphuoctho/telegram-cli/internal/output"
+	"github.com/nphuoctho/telegram-cli/internal/tgclient"
 	"github.com/spf13/cobra"
 )
 
@@ -52,7 +53,7 @@ func newRootCmd() *cobra.Command {
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
 		return &config.UsageError{Msg: err.Error()}
 	})
-	root.AddCommand(newInitCmd())
+	root.AddCommand(newInitCmd(), newAuthCmd(), newMeCmd())
 	return root
 }
 
@@ -60,6 +61,8 @@ func newRootCmd() *cobra.Command {
 func exitCode(err error) (int, string) {
 	var usage *config.UsageError
 	var nc *config.NotConfiguredError
+	var ar *tgclient.AuthRequiredError
+	var fw *tgclient.FloodWaitError
 	switch {
 	case err == nil:
 		return 0, ""
@@ -69,13 +72,17 @@ func exitCode(err error) (int, string) {
 		return 2, "USAGE"
 	case errors.As(err, &nc):
 		return 3, "NOT_CONFIGURED"
+	case errors.As(err, &ar):
+		return 4, "AUTH_REQUIRED"
+	case errors.As(err, &fw):
+		return 6, "FLOOD_WAIT"
 	}
 	return 1, "ERROR"
 }
 
 // run executes root, prints any error to errW, and returns the exit code.
 func run(ctx context.Context, root *cobra.Command, errW io.Writer) int {
-	err := root.ExecuteContext(ctx)
+	err := tgclient.MapError(root.ExecuteContext(ctx))
 	code, name := exitCode(err)
 	if err != nil {
 		asJSON, _ := root.PersistentFlags().GetBool("json")
