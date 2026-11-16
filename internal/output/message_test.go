@@ -13,6 +13,11 @@ import (
 
 func init() { time.Local = time.UTC }
 
+func nm(e messages.Elem) Message {
+	m, _ := NewMessage(e, nil)
+	return m
+}
+
 func elem(m tg.NotEmptyMessage) messages.Elem {
 	return messages.Elem{Msg: m, Entities: peer.NewEntities(
 		map[int64]*tg.User{1: {ID: 1, FirstName: "Alice", Username: "alice"}},
@@ -43,7 +48,7 @@ func TestNewMessageMedia(t *testing.T) {
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
-			got := NewMessage(elem(&tg.Message{ID: 1, PeerID: pm, Date: 1, Media: c.media}))
+			got := nm(elem(&tg.Message{ID: 1, PeerID: pm, Date: 1, Media: c.media}))
 			if c.want != nil && name != "photo" {
 				// document names come from gotd's generated fallback unless a filename attribute exists
 				if c.want.FileName == "" {
@@ -56,7 +61,7 @@ func TestNewMessageMedia(t *testing.T) {
 }
 
 func TestNewMessageFields(t *testing.T) {
-	m := NewMessage(elem(&tg.Message{
+	m := nm(elem(&tg.Message{
 		ID: 10, Date: 1763276525, Message: "hi\nthere", PeerID: &tg.PeerChannel{ChannelID: 5},
 		ReplyTo: &tg.MessageReplyHeader{ReplyToMsgID: 3},
 	}))
@@ -64,14 +69,14 @@ func TestNewMessageFields(t *testing.T) {
 	require.Nil(t, m.From) // channel post without from
 	require.Equal(t, 3, m.ReplyToID)
 
-	m = NewMessage(elem(&tg.Message{ID: 11, Date: 1, PeerID: &tg.PeerChannel{ChannelID: 5}, FromID: &tg.PeerUser{UserID: 1}}))
+	m = nm(elem(&tg.Message{ID: 11, Date: 1, PeerID: &tg.PeerChannel{ChannelID: 5}, FromID: &tg.PeerUser{UserID: 1}}))
 	require.Equal(t, &Sender{ID: 1, Name: "Alice", Username: "alice"}, m.From)
 
 	// private chat incoming message without from_id
-	m = NewMessage(elem(&tg.Message{ID: 12, Date: 1, PeerID: &tg.PeerUser{UserID: 1}}))
+	m = nm(elem(&tg.Message{ID: 12, Date: 1, PeerID: &tg.PeerUser{UserID: 1}}))
 	require.Equal(t, int64(1), m.From.ID)
 
-	m = NewMessage(elem(&tg.MessageService{ID: 13, Date: 1, PeerID: &tg.PeerChat{ChatID: 2}, FromID: &tg.PeerUser{UserID: 1}, Action: &tg.MessageActionChatAddUser{}}))
+	m = nm(elem(&tg.MessageService{ID: 13, Date: 1, PeerID: &tg.PeerChat{ChatID: 2}, FromID: &tg.PeerUser{UserID: 1}, Action: &tg.MessageActionChatAddUser{}}))
 	require.True(t, m.Service)
 	require.Equal(t, "MessageActionChatAddUser", m.Text)
 	require.Equal(t, int64(-2), m.ChatID)
@@ -91,4 +96,13 @@ func TestPrintMessages(t *testing.T) {
 #2  2025-11-16 07:02
   * MessageActionPinMessage
 `, b.String())
+}
+
+func TestNewMessageOwnWithoutFrom(t *testing.T) {
+	e := elem(&tg.Message{ID: 1, Date: 1, Out: true, PeerID: &tg.PeerUser{UserID: 1}})
+	m, ok := NewMessage(e, func() *tg.User { return &tg.User{ID: 9, FirstName: "Me", Username: "me"} })
+	require.True(t, ok)
+	require.Equal(t, &Sender{ID: 9, Name: "Me", Username: "me"}, m.From)
+	m, _ = NewMessage(e, nil)
+	require.Nil(t, m.From)
 }
