@@ -166,3 +166,20 @@ func TestAtomicWrite(t *testing.T) {
 		require.Equal(t, os.FileMode(0o600), st.Mode().Perm())
 	}
 }
+
+func TestResolveBothEnvIgnoresCorruptFile(t *testing.T) {
+	d := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", d)
+	t.Setenv("TELEGRAM_APP_ID", "42")
+	t.Setenv("TELEGRAM_APP_HASH", strings.Repeat("a", 32))
+	require.NoError(t, os.MkdirAll(filepath.Join(d, "telegram-cli"), 0o700))
+	require.NoError(t, os.WriteFile(filepath.Join(d, "telegram-cli", "credentials.json"), []byte("{corrupt"), 0o600))
+	r, err := Resolve()
+	require.NoError(t, err)
+	require.Equal(t, "env", r.Source)
+	require.Equal(t, 42, r.APIID)
+
+	t.Setenv("TELEGRAM_APP_HASH", "") // one env var is not enough to ignore the file
+	_, err = Resolve()
+	require.Error(t, err)
+}

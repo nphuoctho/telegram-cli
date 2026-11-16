@@ -35,7 +35,16 @@ var runTelegram = func(ctx context.Context, c *cobra.Command, needAuth bool, fn 
 }
 
 func newAuthCmd() *cobra.Command {
-	a := &cobra.Command{Use: "auth", Short: "Log in, log out, and show the session"}
+	a := &cobra.Command{
+		Use:   "auth",
+		Short: "Log in, log out, and show the session",
+		RunE: func(_ *cobra.Command, args []string) error {
+			if len(args) > 0 {
+				return &config.UsageError{Msg: fmt.Sprintf("unknown command %q for auth", args[0])}
+			}
+			return &config.UsageError{Msg: "missing subcommand: login, logout, or status"}
+		},
+	}
 	var phone string
 	login := &cobra.Command{
 		Use:   "login",
@@ -44,24 +53,11 @@ func newAuthCmd() *cobra.Command {
 		RunE: func(c *cobra.Command, _ []string) error {
 			term := &tgclient.Terminal{In: c.InOrStdin(), Err: c.ErrOrStderr(), PhoneFlag: phone}
 			return runTelegram(c.Context(), c, false, func(ctx context.Context, s *tgclient.Session) error {
-				st, err := s.Client.Auth().Status(ctx)
+				u, err := tgclient.Login(ctx, s, term)
 				if err != nil {
 					return err
 				}
-				if !st.Authorized {
-					if err := s.Client.Auth().IfNecessary(ctx, auth.NewFlow(term, auth.SendCodeOptions{})); err != nil {
-						var su *auth.SignUpRequired
-						if errors.As(err, &su) {
-							return term.SignUpError()
-						}
-						return err
-					}
-				}
-				u, err := s.Peers.Self(ctx)
-				if err != nil {
-					return err
-				}
-				return printSelf(c, u.Raw(), true)
+				return printSelf(c, u, true)
 			})
 		},
 	}
@@ -184,20 +180,29 @@ func runLogout(c *cobra.Command, _ []string) error {
 		fmt.Fprintln(c.OutOrStdout(), "Not logged in")
 		return nil
 	}
-	rpcErr := runTelegram(c.Context(), c, false, func(ctx context.Context, s *tgclient.Session) error {
-		_, err := s.API.AuthLogOut(ctx)
-		if auth.IsUnauthorized(err) {
-			return nil // already logged out server-side
-		}
-		return err
-	})
+	var rpcErr error
+	notTold := false
+	if _, err := config.Resolve(); err != nil {
+		notTold = true
+	} else {
+		rpcErr = runTelegram(c.Context(), c, false, func(ctx context.Context, s *tgclient.Session) error {
+			_, err := s.API.AuthLogOut(ctx)
+			if auth.IsUnauthorized(err) {
+				return nil // already logged out server-side
+			}
+			return err
+		})
+	}
 	for _, name := range []string{"session.json", "peers.json"} {
 		if err := os.Remove(filepath.Join(dir, name)); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return err
 		}
 	}
+	if notTold {
+		return errors.New("local session removed, but Telegram was not told (API credentials missing); end the session in Settings > Devices")
+	}
 	if rpcErr != nil {
-		return fmt.Errorf("local session removed, but Telegram logout failed: %w; end the session in Settings > Devices", rpcErr)
+		return fmt.Errorf("local session removed, but Telegram logout failed: %v; end the session in Settings > Devices", rpcErr)
 	}
 	if jsonMode(c) {
 		return output.JSON(c.OutOrStdout(), map[string]any{"logged_out": true})
