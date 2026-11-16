@@ -63,6 +63,9 @@ func NewMessage(e messages.Elem) Message {
 	return Message{}
 }
 
+// PeerID returns the Bot-API style ID of a peer.
+func PeerID(p tg.PeerClass) int64 { return peerID(p) }
+
 func peerID(p tg.PeerClass) int64 {
 	var id constant.TDLibPeerID
 	switch p := p.(type) {

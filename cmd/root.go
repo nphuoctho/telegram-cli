@@ -53,7 +53,7 @@ func newRootCmd() *cobra.Command {
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
 		return &config.UsageError{Msg: err.Error()}
 	})
-	root.AddCommand(newInitCmd(), newAuthCmd(), newMeCmd(), newChatsCmd(), newMessagesCmd(), newSendCmd(), newUploadCmd(), newDownloadCmd(), newExportCmd())
+	root.AddCommand(newInitCmd(), newAuthCmd(), newMeCmd(), newChatsCmd(), newMessagesCmd(), newSendCmd(), newUploadCmd(), newDownloadCmd(), newExportCmd(), newWatchCmd())
 	return root
 }
 
