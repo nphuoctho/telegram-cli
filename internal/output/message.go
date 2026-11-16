@@ -5,6 +5,7 @@ import (
 	"io"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/gotd/td/constant"
 	"github.com/gotd/td/telegram/query/messages"
@@ -182,17 +183,28 @@ func photoSize(p *tg.Photo) (n int64) {
 	return n
 }
 
+// clean replaces control characters (ESC, CR, C1, ...) other than tab and newline
+// with U+FFFD so text from other users cannot drive the terminal. Readable output only.
+func clean(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) && r != '\n' && r != '\t' {
+			return '\uFFFD'
+		}
+		return r
+	}, s)
+}
+
 // PrintMessages writes messages in the readable format of spec section 6.
 func PrintMessages(w io.Writer, msgs []Message) {
 	for _, m := range msgs {
 		fmt.Fprintf(w, "#%d  %s", m.ID, m.Date.Local().Format("2006-01-02 15:04"))
 		if f := m.From; f != nil {
-			name := f.Name
+			name := cleanLine(f.Name)
 			if name == "" {
 				name = fmt.Sprintf("id %d", f.ID)
 			}
 			if f.Username != "" {
-				name += " (@" + f.Username + ")"
+				name += " (@" + cleanLine(f.Username) + ")"
 			}
 			fmt.Fprintf(w, "  %s", name)
 		}
@@ -201,16 +213,16 @@ func PrintMessages(w io.Writer, msgs []Message) {
 		}
 		fmt.Fprintln(w)
 		if m.Service {
-			fmt.Fprintf(w, "  * %s\n", m.Text)
+			fmt.Fprintf(w, "  * %s\n", cleanLine(m.Text))
 		} else if m.Text != "" {
-			for _, l := range strings.Split(m.Text, "\n") {
+			for _, l := range strings.Split(clean(m.Text), "\n") {
 				fmt.Fprintf(w, "  %s\n", l)
 			}
 		}
 		if md := m.Media; md != nil {
-			line := "[" + md.Type + "]"
+			line := "[" + cleanLine(md.Type) + "]"
 			if md.FileName != "" {
-				line += " " + md.FileName
+				line += " " + cleanLine(md.FileName)
 			}
 			if md.Size > 0 {
 				line += " (" + Size(md.Size) + ")"
@@ -218,4 +230,14 @@ func PrintMessages(w io.Writer, msgs []Message) {
 			fmt.Fprintf(w, "  %s\n", line)
 		}
 	}
+}
+
+// cleanLine is clean for single-line fields: newlines and tabs are replaced too.
+func cleanLine(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return '\uFFFD'
+		}
+		return r
+	}, s)
 }
