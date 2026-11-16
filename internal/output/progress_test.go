@@ -2,6 +2,7 @@ package output
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 	"time"
 
@@ -40,4 +41,12 @@ func TestProgressThrottleUnknownTotal(t *testing.T) {
 	first := b.String()
 	p.Update(2, 0)
 	require.Equal(t, first, b.String())
+}
+
+func TestProgressNameShortenedAndCleaned(t *testing.T) {
+	var b bytes.Buffer
+	p := NewProgress(&b, "a\x1bb"+strings.Repeat("é", 100))
+	require.LessOrEqual(t, len([]rune(p.Name)), 30)
+	require.NotContains(t, p.Name, "\x1b")
+	require.True(t, strings.HasSuffix(p.Name, "…"))
 }

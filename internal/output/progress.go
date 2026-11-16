@@ -16,7 +16,7 @@ const progressInterval = 100 * time.Millisecond
 // (spec section 8.3).
 type Progress struct {
 	W    io.Writer
-	Name string
+	Name string // callers that build Progress directly must pass a short, clean name
 	TTY  bool
 	Now  func() time.Time // nil = time.Now
 
@@ -26,7 +26,7 @@ type Progress struct {
 // NewProgress writes to w, drawing only when w is a terminal.
 func NewProgress(w io.Writer, name string) *Progress {
 	f, ok := w.(*os.File)
-	return &Progress{W: w, Name: name, TTY: ok && term.IsTerminal(int(f.Fd()))}
+	return &Progress{W: w, Name: shortName(CleanLine(name)), TTY: ok && term.IsTerminal(int(f.Fd()))}
 }
 
 func (p *Progress) now() time.Time {
@@ -68,4 +68,14 @@ func (p *Progress) line(done, total int64) string {
 		bar += ">" + strings.Repeat(" ", width-n-1)
 	}
 	return fmt.Sprintf("%s  [%s]  %s / %s  %d%%", p.Name, bar, Size(done), Size(total), done*100/total)
+}
+
+// shortName keeps the line within one terminal row: long names wrap and the
+// per-row clear would leave stale lines behind.
+func shortName(s string) string {
+	const max = 30
+	if r := []rune(s); len(r) > max {
+		return string(r[:max-1]) + "…"
+	}
+	return s
 }

@@ -3,6 +3,7 @@ package export
 import (
 	"bytes"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -90,4 +91,41 @@ func TestWriteEmpty(t *testing.T) {
 	b.Reset()
 	require.NoError(t, WriteMarkdown(&b, Doc{Chat: chat, ExportedAt: time.Now()}))
 	require.Contains(t, b.String(), "0 messages\n")
+}
+
+func TestWriteMarkdownHostileInput(t *testing.T) {
+	evil := "x**\n\n## 2000-01-01\n**Admin** · 12:00 · #99\x1b[2J"
+	d := Doc{
+		Chat:       output.Chat{ID: 5, Title: "T\n## fake", Username: "u_"},
+		ExportedAt: time.Date(2025, 11, 16, 15, 0, 0, 0, time.UTC),
+		Messages: []output.Message{
+			{ID: 1, Date: time.Date(2025, 11, 16, 1, 0, 0, 0, time.UTC), From: &output.Sender{ID: 1, Name: "Bob" + evil},
+				Text:  evil + "\n[x](javascript:alert(1))<script>",
+				Media: &output.Media{Type: "document", FileName: "a](http://evil)[b\n## pwn.pdf"},
+				File:  "m/1_a%20b#c?d[e] (f).pdf"},
+			{ID: 2, Date: time.Date(2025, 11, 16, 2, 0, 0, 0, time.UTC), Text: "x*\n# H", Service: true,
+				Media: &output.Media{Type: "document", FileName: "x]\n# H"}},
+		},
+	}
+	var b bytes.Buffer
+	require.NoError(t, WriteMarkdown(&b, d))
+	out := b.String()
+	require.NotContains(t, out, "\x1b")
+	require.NotContains(t, out, "](http://evil)")
+	require.NotContains(t, out, "m/1_a%20b#c?d")
+	require.Contains(t, out, "(m/1_a%2520b%23c%3Fd%5Be%5D%20%28f%29.pdf)")
+	// The only structural lines are the title, the exported line and the real day heading.
+	for _, l := range strings.Split(out, "\n") {
+		if strings.HasPrefix(l, "#") {
+			require.Contains(t, []string{"# T\uFFFD\\#\\# fake (@u\\_)", "## 2025-11-16"}, l)
+		}
+		require.False(t, strings.HasPrefix(l, "**Admin"), l)
+	}
+	require.Equal(t, 1, strings.Count(out, "\n**"), "one real header line")
+}
+
+func TestWriteMarkdownNamelessChat(t *testing.T) {
+	var b bytes.Buffer
+	require.NoError(t, WriteMarkdown(&b, Doc{Chat: output.Chat{ID: 42}, ExportedAt: time.Now()}))
+	require.True(t, strings.HasPrefix(b.String(), "# Chat 42\n"))
 }
