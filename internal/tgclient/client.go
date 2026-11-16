@@ -54,6 +54,14 @@ func Run(ctx context.Context, o Options, fn func(context.Context, *Session) erro
 	if err := os.MkdirAll(o.DataDir, 0o700); err != nil {
 		return err
 	}
+	store, err := LoadPeerStore(PeersPath(o.DataDir))
+	if err != nil {
+		if o.NeedAuth {
+			return err
+		}
+		// auth login/logout must work even with a corrupt cache (logout deletes it).
+		store = &PeerStore{path: PeersPath(o.DataDir), data: map[peers.Key]int64{}}
+	}
 	client := telegram.NewClient(o.APIID, o.APIHash, telegram.Options{
 		SessionStorage: &session.FileStorage{Path: path},
 		NoUpdates:      true,
@@ -61,15 +69,19 @@ func Run(ctx context.Context, o Options, fn func(context.Context, *Session) erro
 		Device:         telegram.DeviceConfig{DeviceModel: "telegram-cli " + o.Version, AppVersion: o.Version},
 		Middlewares:    []telegram.Middleware{FloodWait(o.MaxFloodWait, o.Clock, o.Stderr)},
 	})
-	err := client.Run(ctx, func(ctx context.Context) error {
+	err = client.Run(ctx, func(ctx context.Context) error {
 		api := client.API()
-		s := &Session{Client: client, API: api, Peers: peers.Options{}.Build(api)}
+		s := &Session{Client: client, API: api, Peers: peers.Options{Storage: store}.Build(api)}
 		if o.NeedAuth {
 			if err := s.Peers.Init(ctx); err != nil {
 				return err
 			}
 		}
-		return fn(ctx, s)
+		ferr := fn(ctx, s)
+		if serr := store.Flush(); serr != nil && ferr == nil {
+			return serr
+		}
+		return ferr
 	})
 	if err == nil {
 		// gotd only sets 0600 when it creates the file; make sure.
