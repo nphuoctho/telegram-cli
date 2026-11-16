@@ -153,3 +153,45 @@ func TestChatsListJSON(t *testing.T) {
 	require.Equal(t, 0, code, errS)
 	require.JSONEq(t, `[{"id":123456789,"type":"user","title":"Saved Messages","username":"","unread":0}]`, out)
 }
+
+func TestMessagesReadChannelPrivateExit5(t *testing.T) {
+	setup(t)
+	m := tgmock.NewRequire(t)
+	m.ExpectCall(&tg.ContactsResolveUsernameRequest{Username: "priv"}).ThenResult(&tg.ContactsResolvedPeer{
+		Peer:  &tg.PeerChannel{ChannelID: 5},
+		Chats: []tg.ChatClass{&tg.Channel{ID: 5, AccessHash: 1, Title: "P", Photo: &tg.ChatPhotoEmpty{}}},
+	})
+	m.Expect().ThenRPCErr(&tgerr.Error{Code: 400, Type: "CHANNEL_PRIVATE"})
+	useMock(t, m)
+	code, _, errS := exec(t, "", "messages", "read", "@priv")
+	require.Equal(t, 5, code, errS)
+	require.Contains(t, errS, "@priv")
+}
+
+func TestMessagesSearchChannelPrivateExit5(t *testing.T) {
+	setup(t)
+	m := tgmock.NewRequire(t)
+	m.Expect().ThenRPCErr(&tgerr.Error{Code: 400, Type: "PEER_ID_INVALID"})
+	useMock(t, m)
+	code, _, errS := exec(t, "", "messages", "search", "me", "x")
+	require.Equal(t, 5, code, errS)
+}
+
+func TestMessagesReadSkipsEmptyAndFillsOwnSender(t *testing.T) {
+	setup(t)
+	m := tgmock.NewRequire(t)
+	own := &tg.Message{ID: 3, Date: 1763276525, Message: "mine", Out: true, PeerID: &tg.PeerUser{UserID: 777}}
+	res := &tg.MessagesMessages{Users: []tg.UserClass{&tg.User{ID: 777, AccessHash: 1, FirstName: "Bob"}}}
+	res.Messages = []tg.MessageClass{own, &tg.MessageEmpty{ID: 2}, textMsg(1, "old")}
+	expectHistory(t, m, func(*tg.MessagesGetHistoryRequest) {}, res)
+	m.ExpectCall(selfReq).ThenResult(alice())
+	useMock(t, m)
+	code, out, errS := exec(t, "", "messages", "read", "me", "--limit", "2", "--json")
+	require.Equal(t, 0, code, errS)
+	var got []map[string]any
+	require.NoError(t, json.Unmarshal([]byte(out), &got))
+	require.Len(t, got, 2) // the empty entry is neither printed nor counted
+	require.EqualValues(t, 1, got[0]["id"])
+	require.EqualValues(t, 3, got[1]["id"])
+	require.Equal(t, "Alice Liddell", got[1]["from"].(map[string]any)["name"])
+}

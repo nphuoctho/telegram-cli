@@ -32,3 +32,12 @@ func TestProgressSilentWithoutTerminal(t *testing.T) {
 	p.Done()
 	require.Empty(t, b.String())
 }
+
+func TestProgressThrottleUnknownTotal(t *testing.T) {
+	var b bytes.Buffer
+	p := &Progress{W: &b, Name: "x", TTY: true, Now: func() time.Time { return time.Unix(0, 0) }}
+	p.Update(1, 0)
+	first := b.String()
+	p.Update(2, 0)
+	require.Equal(t, first, b.String())
+}

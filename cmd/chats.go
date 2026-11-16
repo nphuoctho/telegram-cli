@@ -24,7 +24,7 @@ func newChatsCmd() *cobra.Command {
 			out := []output.Chat{}
 			err := runTelegram(c.Context(), c, true, func(ctx context.Context, s *tgclient.Session) error {
 				it := query.GetDialogs(s.API).BatchSize(100).Iter()
-				for it.Next(ctx) && (limit == 0 || len(out) < limit) {
+				for (limit == 0 || len(out) < limit) && it.Next(ctx) {
 					e := it.Value()
 					if err := tgclient.ApplyDialog(ctx, s.Peers, e); err != nil {
 						return err

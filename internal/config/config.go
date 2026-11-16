@@ -187,8 +187,12 @@ const notConfiguredMsg = `run "telegram-cli init" or set TELEGRAM_APP_ID and TEL
 func Resolve() (Resolved, error) {
 	var r Resolved
 	file, err := LoadCredentials()
+	bothEnv := os.Getenv("TELEGRAM_APP_ID") != "" && os.Getenv("TELEGRAM_APP_HASH") != ""
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return r, err
+		if !bothEnv { // env fully overrides the file, so a bad file is irrelevant then
+			return r, err
+		}
+		file, err = Credentials{}, fs.ErrNotExist
 	}
 	fromFile := err == nil
 	r.APIID, r.APIHash = file.APIID, file.APIHash

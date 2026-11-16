@@ -36,6 +36,15 @@ func newWatchCmd() *cobra.Command {
 				return w.handle(e, u.Message)
 			})
 			err := runWatch(c.Context(), c, dp, func(ctx context.Context, s *tgclient.Session) error {
+				if s != nil {
+					w.setSelf(func() *tg.User {
+						u, err := s.Peers.Self(ctx)
+						if err != nil {
+							return nil
+						}
+						return u.Raw()
+					})
+				}
 				if len(args) == 0 {
 					return nil
 				}
@@ -45,7 +54,7 @@ func newWatchCmd() *cobra.Command {
 					if err != nil {
 						return err
 					}
-					id, err := inputPeerID(ctx, s, p)
+					_, id, err := peerInfo(ctx, s, p)
 					if err != nil {
 						return err
 					}
@@ -69,6 +78,13 @@ type watcher struct {
 
 	mu     sync.Mutex
 	filter map[int64]bool // nil = all chats
+	self   func() *tg.User
+}
+
+func (w *watcher) setSelf(f func() *tg.User) {
+	w.mu.Lock()
+	w.self = f
+	w.mu.Unlock()
 }
 
 func (w *watcher) setFilter(f map[int64]bool) {
@@ -83,16 +99,21 @@ func (w *watcher) handle(e tg.Entities, mc tg.MessageClass) error {
 		return nil
 	}
 	ents := peer.EntitiesFromUpdate(e)
-	m := output.NewMessage(messages.Elem{Msg: nm, Entities: ents})
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	m, ok := output.NewMessage(messages.Elem{Msg: nm, Entities: ents}, w.self)
+	if !ok {
+		return nil
+	}
 	if w.filter != nil && !w.filter[m.ChatID] {
 		return nil
 	}
 	if w.json {
 		return output.JSON(w.out, m)
 	}
-	fmt.Fprintf(w.out, "[%s]\n", chatName(ents, nm))
+	if _, err := fmt.Fprintf(w.out, "[%s]\n", chatName(ents, nm)); err != nil {
+		return err
+	}
 	output.PrintMessages(w.out, []output.Message{m})
 	return nil
 }

@@ -527,7 +527,8 @@ goes to stdout, so `--json` output stays clean.
   The whole range is held in memory before writing.
 - `--media`: downloads attachments into `<output-stem>_media/` next to the output file,
   using the download naming and sanitizing rules from 8.2. Existing files are skipped, so a
-  re-run only fetches what is missing. A failed attachment download is a warning on stderr,
+  re-run only fetches what is missing. Because chats can be private, the media directory
+  is created 0700 and its files are written 0600, like the export file (unlike `download`). A failed attachment download is a warning on stderr,
   leaves `file` unset for that message, and does not fail the export.
 
 JSON format:

@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gotd/td/bin"
+	"github.com/gotd/td/telegram/peers"
 	"github.com/gotd/td/tg"
 	"github.com/gotd/td/tgmock"
 	"github.com/spf13/cobra"
@@ -108,4 +110,58 @@ func TestWatchFilterDropsOtherChats(t *testing.T) {
 	require.Equal(t, 0, code, errS)
 	require.Equal(t, 1, strings.Count(out, "\n"), out)
 	require.Contains(t, out, `"text":"hi"`)
+}
+
+// sessionOver builds a Session on api.
+func sessionOver(api tg.Invoker) *tgclient.Session {
+	c := tg.NewClient(api)
+	return &tgclient.Session{API: c, Peers: peers.Options{}.Build(c)}
+}
+
+func TestWatchFilterChannel(t *testing.T) {
+	setup(t)
+	m := tgmock.NewRequire(t)
+	m.ExpectFunc(func(b bin.Encoder) {
+		r, ok := b.(*tg.ContactsResolveUsernameRequest)
+		require.True(t, ok, "got %T", b)
+		require.Equal(t, "gophers", r.Username)
+	}).ThenResult(&tg.ContactsResolvedPeer{
+		Peer:  &tg.PeerChannel{ChannelID: 77},
+		Chats: []tg.ChatClass{&tg.Channel{ID: 77, AccessHash: 5, Title: "Gophers", Username: "gophers", Photo: &tg.ChatPhotoEmpty{}}},
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	old := runWatch
+	t.Cleanup(func() { runWatch = old })
+	runWatch = func(ctx context.Context, _ *cobra.Command, d *tg.UpdateDispatcher, fn func(context.Context, *tgclient.Session) error) error {
+		if err := fn(ctx, sessionOver(m)); err != nil {
+			return err
+		}
+		feed(t, d, twoUpdates()...)
+		cancel()
+		return ctx.Err()
+	}
+	code, out, errS := runCancelable(t, cancel, ctx, "watch", "@gophers", "--json")
+	require.Equal(t, 0, code, errS)
+	require.Equal(t, 1, strings.Count(out, "\n"), out)
+	require.Contains(t, out, `"text":"hello group"`)
+}
+
+type cancelInvoker struct{}
+
+func (cancelInvoker) Invoke(context.Context, bin.Encoder, bin.Decoder) error {
+	return context.Canceled
+}
+
+func TestWatchCtrlCDuringChatResolutionExits0(t *testing.T) {
+	setup(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	old := runWatch
+	t.Cleanup(func() { runWatch = old })
+	runWatch = func(ctx context.Context, _ *cobra.Command, _ *tg.UpdateDispatcher, fn func(context.Context, *tgclient.Session) error) error {
+		cancel()
+		return tgclient.MapError(fn(ctx, sessionOver(cancelInvoker{})))
+	}
+	code, out, errS := runCancelable(t, cancel, ctx, "watch", "@gophers")
+	require.Equal(t, 0, code, errS)
+	require.Empty(t, out+errS)
 }
