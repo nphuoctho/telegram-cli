@@ -21,12 +21,23 @@ type PeerNotFoundError struct{ Msg string }
 
 func (e *PeerNotFoundError) Error() string { return e.Msg }
 
+// NotFound builds the exit-5 error for the identifier the user typed.
+func NotFound(arg string) *PeerNotFoundError {
+	if numericID.MatchString(arg) {
+		return &PeerNotFoundError{fmt.Sprintf(`chat %s not found; check "telegram-cli chats list"`, arg)}
+	}
+	return &PeerNotFoundError{fmt.Sprintf("chat %s not found", arg)}
+}
+
 var numericID = regexp.MustCompile(`^-?[0-9]+$`)
 
 var notFoundRPC = []string{
 	"USERNAME_NOT_OCCUPIED", "USERNAME_INVALID", "PEER_ID_INVALID", "CHANNEL_INVALID",
 	"CHANNEL_PRIVATE", "USER_ID_INVALID", "CHAT_ID_INVALID",
 }
+
+// IsNotFound reports whether err means the chat does not exist or is not accessible.
+func IsNotFound(err error) bool { return isNotFound(err) }
 
 func isNotFound(err error) bool {
 	var pnf *peers.PeerNotFoundError
@@ -52,13 +63,13 @@ func ResolveChat(ctx context.Context, api *tg.Client, m *peers.Manager, arg stri
 		p, err := m.Resolve(ctx, arg)
 		if err != nil {
 			if isNotFound(err) {
-				return nil, &PeerNotFoundError{fmt.Sprintf("chat %s not found", arg)}
+				return nil, NotFound(arg)
 			}
 			return nil, err
 		}
 		return p.InputPeer(), nil
 	}
-	notFound := &PeerNotFoundError{fmt.Sprintf(`chat %s not found; check "telegram-cli chats list"`, arg)}
+	notFound := NotFound(arg)
 	n, err := strconv.ParseInt(arg, 10, 64)
 	id := constant.TDLibPeerID(n)
 	if err != nil || !(id.IsUser() || id.IsChat() || id.IsChannel()) {
