@@ -168,7 +168,7 @@ func TestUnknownFlagIsUsage(t *testing.T) {
 func TestWrongArgCountExitsUsage(t *testing.T) {
 	setup(t)
 	for _, args := range [][]string{
-		{"send"}, {"send", "a", "b", "c"}, {"upload"}, {"download"},
+		{"send"}, {"send", "a", "b", "c"}, {"upload"}, {"download"}, {"export"}, {"export", "a", "b"},
 		{"messages", "read"}, {"messages", "search"}, {"chats", "list", "x"},
 		{"me", "x"}, {"init", "x"}, {"auth", "status", "x"},
 	} {

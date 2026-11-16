@@ -232,6 +232,9 @@ func PrintMessages(w io.Writer, msgs []Message) {
 	}
 }
 
+// CleanText is clean for multi-line text such as a message body.
+func CleanText(s string) string { return clean(s) }
+
 // CleanLine is clean for single-line fields: newlines and tabs are replaced too.
 func CleanLine(s string) string {
 	return strings.Map(func(r rune) rune {

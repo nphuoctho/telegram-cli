@@ -182,12 +182,12 @@ var ErrSkipped = errors.New("exists")
 
 // DownloadTo downloads loc into target via target+".part". An existing target
 // yields ErrSkipped unless overwrite is set. The .part file never outlives a failure.
-func DownloadTo(ctx context.Context, api *tg.Client, loc tg.InputFileLocationClass, size int64, target string, overwrite bool, progress func(done, total int64)) (err error) {
+func DownloadTo(ctx context.Context, api *tg.Client, loc tg.InputFileLocationClass, size int64, target string, mode os.FileMode, overwrite bool, progress func(done, total int64)) (err error) {
 	if _, serr := os.Stat(target); serr == nil && !overwrite {
 		return ErrSkipped
 	}
 	part := target + ".part"
-	f, err := os.OpenFile(part, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(part, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, mode)
 	if err != nil {
 		return err
 	}
