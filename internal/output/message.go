@@ -40,27 +40,29 @@ type Message struct {
 	Service   bool      `json:"service"`
 }
 
-// NewMessage converts a history or search element.
-func NewMessage(e messages.Elem) Message {
+// NewMessage converts a history or search element. self (may be nil) is used as
+// the sender of own messages in private chats, where Telegram can omit from_id.
+// ok is false for anything that is not a real message.
+func NewMessage(e messages.Elem, self func() *tg.User) (Message, bool) {
 	switch m := e.Msg.(type) {
 	case *tg.MessageService:
 		return Message{
 			ID: m.ID, ChatID: peerID(m.PeerID), Date: time.Unix(int64(m.Date), 0).Local(),
-			From: sender(e, m.FromID, m.PeerID, m.Out), Out: m.Out, Service: true,
+			From: sender(e, m.FromID, m.PeerID, m.Out, self), Out: m.Out, Service: true,
 			Text: strings.TrimPrefix(fmt.Sprintf("%T", m.Action), "*tg."),
-		}
+		}, true
 	case *tg.Message:
 		v := Message{
 			ID: m.ID, ChatID: peerID(m.PeerID), Date: time.Unix(int64(m.Date), 0).Local(),
-			From: sender(e, m.FromID, m.PeerID, m.Out), Out: m.Out, Text: m.Message,
+			From: sender(e, m.FromID, m.PeerID, m.Out, self), Out: m.Out, Text: m.Message,
 		}
 		if h, ok := m.ReplyTo.(*tg.MessageReplyHeader); ok {
 			v.ReplyToID = h.ReplyToMsgID
 		}
 		v.Media = newMedia(e, m.Media)
-		return v
+		return v, true
 	}
-	return Message{}
+	return Message{}, false
 }
 
 func peerID(p tg.PeerClass) int64 {
@@ -76,14 +78,24 @@ func peerID(p tg.PeerClass) int64 {
 	return int64(id)
 }
 
-func sender(e messages.Elem, from, chat tg.PeerClass, out bool) *Sender {
+func sender(e messages.Elem, from, chat tg.PeerClass, out bool, self func() *tg.User) *Sender {
 	if from == nil {
-		// Private chats may omit from_id on incoming messages.
-		if pu, ok := chat.(*tg.PeerUser); ok && !out {
-			from = pu
-		} else {
+		// Private chats may omit from_id: incoming is the other user, outgoing is us.
+		pu, ok := chat.(*tg.PeerUser)
+		if !ok {
 			return nil
 		}
+		if out {
+			if self == nil {
+				return nil
+			}
+			u := self()
+			if u == nil {
+				return nil
+			}
+			return &Sender{ID: u.ID, Name: strings.TrimSpace(u.FirstName + " " + u.LastName), Username: u.Username}
+		}
+		from = pu
 	}
 	switch p := from.(type) {
 	case *tg.PeerUser:

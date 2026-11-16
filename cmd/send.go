@@ -6,7 +6,6 @@ import (
 	"io"
 	"strings"
 
-	"github.com/gotd/td/constant"
 	"github.com/gotd/td/telegram/message"
 	"github.com/gotd/td/telegram/message/unpack"
 	"github.com/gotd/td/tg"
@@ -42,9 +41,14 @@ func newSendCmd() *cobra.Command {
 			}
 			var id int
 			var chatID int64
+			var label string
 			err := runTelegram(c.Context(), c, true, func(ctx context.Context, s *tgclient.Session) error {
 				p, err := tgclient.ResolveChat(ctx, s.API, s.Peers, args[0])
 				if err != nil {
+					return err
+				}
+				// Look the peer up before sending so a failure here never follows a delivered message.
+				if label, chatID, err = peerInfo(ctx, s, p); err != nil {
 					return err
 				}
 				rb := message.NewSender(s.API).To(p)
@@ -52,12 +56,6 @@ func newSendCmd() *cobra.Command {
 					id, err = unpack.MessageID(rb.Reply(replyTo).Text(ctx, text))
 				} else {
 					id, err = unpack.MessageID(rb.Text(ctx, text))
-				}
-				if err != nil {
-					return err
-				}
-				if jsonMode(c) {
-					chatID, err = inputPeerID(ctx, s, p)
 				}
 				return err
 			})
@@ -67,7 +65,7 @@ func newSendCmd() *cobra.Command {
 			if jsonMode(c) {
 				return output.JSON(c.OutOrStdout(), map[string]any{"id": id, "chat_id": chatID})
 			}
-			fmt.Fprintf(c.OutOrStdout(), "Sent message %d to %s\n", id, args[0])
+			fmt.Fprintf(c.OutOrStdout(), "Sent message %d to %s\n", id, label)
 			return nil
 		},
 	}
@@ -75,22 +73,15 @@ func newSendCmd() *cobra.Command {
 	return cmd
 }
 
-// inputPeerID returns the TDLib-style chat ID of p (the same form as the shared JSON objects).
-func inputPeerID(ctx context.Context, s *tgclient.Session, p tg.InputPeerClass) (int64, error) {
-	var id constant.TDLibPeerID
-	switch p := p.(type) {
-	case *tg.InputPeerSelf:
-		u, err := s.Peers.Self(ctx)
-		if err != nil {
-			return 0, err
-		}
-		id.User(u.ID())
-	case *tg.InputPeerUser:
-		id.User(p.UserID)
-	case *tg.InputPeerChat:
-		id.Chat(p.ChatID)
-	case *tg.InputPeerChannel:
-		id.Channel(p.ChannelID)
+// peerInfo returns the display label ("Alice (@alice)") and TDLib-style chat ID of p.
+func peerInfo(ctx context.Context, s *tgclient.Session, p tg.InputPeerClass) (string, int64, error) {
+	peer, err := s.Peers.FromInputPeer(ctx, p)
+	if err != nil {
+		return "", 0, err
 	}
-	return int64(id), nil
+	label := peer.VisibleName()
+	if u, ok := peer.Username(); ok {
+		label += " (@" + u + ")"
+	}
+	return label, int64(peer.TDLibPeerID()), nil
 }

@@ -42,7 +42,7 @@ func (p *Progress) Update(done, total int64) {
 		return
 	}
 	t := p.now()
-	if done < total && !p.last.IsZero() && t.Sub(p.last) < progressInterval {
+	if (total <= 0 || done < total) && !p.last.IsZero() && t.Sub(p.last) < progressInterval {
 		return
 	}
 	p.last = t

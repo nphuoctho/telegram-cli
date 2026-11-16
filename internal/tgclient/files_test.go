@@ -26,6 +26,9 @@ func TestSafeName(t *testing.T) {
 	got := SafeName(long)
 	require.LessOrEqual(t, len(got), 200)
 	require.True(t, strings.HasPrefix(long, got))
+	withExt := SafeName(long + ".pdf")
+	require.LessOrEqual(t, len(withExt), 200)
+	require.True(t, strings.HasSuffix(withExt, ".pdf"))
 }
 
 func TestChooseKind(t *testing.T) {

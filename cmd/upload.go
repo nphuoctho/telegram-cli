@@ -38,25 +38,22 @@ func newUploadCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
+				var chatID int64
+				if jsonMode(c) {
+					if _, chatID, err = peerInfo(ctx, s, p); err != nil {
+						return err
+					}
+				}
 				for _, pl := range plans {
 					pr := output.NewProgress(c.ErrOrStderr(), filepath.Base(pl.Path))
 					id, err := tgclient.SendFile(ctx, s.API, p, pl, caption, pr.Update)
 					pr.Done()
 					if err != nil {
-						return fmt.Errorf("upload %s: %w", pl.Path, err) // chat ID stays 0 in the partial JSON
+						return fmt.Errorf("upload %s: %w", pl.Path, err)
 					}
-					results = append(results, uploadResult{pl.Path, pl.Size, pl.As, id, 0})
+					results = append(results, uploadResult{pl.Path, pl.Size, pl.As, id, chatID})
 					if !jsonMode(c) {
 						fmt.Fprintf(c.OutOrStdout(), "%s  %s  sent as %s  message %d\n", pl.Path, output.Size(pl.Size), pl.As, id)
-					}
-				}
-				if jsonMode(c) {
-					chatID, err := inputPeerID(ctx, s, p)
-					if err != nil {
-						return err
-					}
-					for i := range results {
-						results[i].ChatID = chatID
 					}
 				}
 				return nil

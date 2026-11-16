@@ -64,11 +64,26 @@ func listMessages(c *cobra.Command, chat string, limit int, iter func(*tg.Client
 		if err != nil {
 			return err
 		}
+		self := func() *tg.User {
+			u, err := s.Peers.Self(ctx)
+			if err != nil {
+				return nil
+			}
+			return u.Raw()
+		}
 		it := iter(s.API, p)
 		for len(out) < limit && it.Next(ctx) {
-			out = append(out, output.NewMessage(it.Value()))
+			if v, ok := output.NewMessage(it.Value(), self); ok {
+				out = append(out, v)
+			}
 		}
-		return it.Err()
+		if err := it.Err(); err != nil {
+			if tgclient.IsNotFound(err) { // e.g. CHANNEL_PRIVATE after leaving a channel
+				return tgclient.NotFound(chat)
+			}
+			return err
+		}
+		return nil
 	})
 	if err != nil {
 		return err
