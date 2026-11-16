@@ -38,6 +38,7 @@ func exec(t *testing.T, stdin string, args ...string) (code int, stdout, stderr 
 	root.SetOut(&out)
 	root.SetErr(&errB)
 	code = run(context.Background(), root, &errB)
+	require.NotContains(t, out.String()+errB.String(), testHash) // spec 11.6
 	return code, out.String(), errB.String()
 }
 
