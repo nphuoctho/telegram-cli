@@ -191,7 +191,7 @@ func mdPath(p string) string {
 // mdQuote puts every line of a message body in a block quote, so text from other
 // users cannot start a heading, header line or list at the top level of the file.
 func mdQuote(s string) string {
-	lines := strings.Split(strings.ReplaceAll(strings.ReplaceAll(output.CleanText(s), "\r\n", "\n"), "\r", "\n"), "\n")
+	lines := strings.Split(output.CleanText(strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\r", "\n")), "\n")
 	for i, l := range lines {
 		l = strings.NewReplacer("<", `\<`, "[", `\[`).Replace(l) // no raw HTML or links
 		lines[i] = strings.TrimRight("> "+l, " ")
