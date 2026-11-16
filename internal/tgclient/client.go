@@ -45,6 +45,8 @@ type Options struct {
 	// NeedAuth requires an existing session file (else AuthRequiredError, no
 	// network) and verifies it with Peers.Init before running the callback.
 	NeedAuth bool
+
+	peerStorage peers.Storage // nil = in memory; set by Run
 }
 
 // SessionPath returns <dataDir>/session.json.
@@ -63,7 +65,7 @@ func prepare(o Options) (sessionPath string, err error) {
 
 // start builds the session over api, verifies authorization when required, and runs fn.
 func start(ctx context.Context, o Options, api *tg.Client, authc LoginClient, fn func(context.Context, *Session) error) error {
-	s := &Session{Auth: authc, API: api, Peers: peers.Options{}.Build(api)}
+	s := &Session{Auth: authc, API: api, Peers: peers.Options{Storage: o.peerStorage}.Build(api)}
 	if o.NeedAuth {
 		if err := s.Peers.Init(ctx); err != nil {
 			return err
@@ -86,6 +88,15 @@ func Run(ctx context.Context, o Options, fn func(context.Context, *Session) erro
 	if err != nil {
 		return err
 	}
+	store, err := LoadPeerStore(PeersPath(o.DataDir))
+	if err != nil {
+		if o.NeedAuth {
+			return err
+		}
+		// auth login/logout must work even with a corrupt cache (logout deletes it).
+		store = &PeerStore{path: PeersPath(o.DataDir), data: map[peers.Key]int64{}}
+	}
+	o.peerStorage = store
 	client := telegram.NewClient(o.APIID, o.APIHash, telegram.Options{
 		SessionStorage: &session.FileStorage{Path: path},
 		NoUpdates:      true,
@@ -94,7 +105,11 @@ func Run(ctx context.Context, o Options, fn func(context.Context, *Session) erro
 		Middlewares:    []telegram.Middleware{FloodWait(o.MaxFloodWait, o.Clock, o.Stderr)},
 	})
 	err = client.Run(ctx, func(ctx context.Context) error {
-		return start(ctx, o, client.API(), client.Auth(), fn)
+		ferr := start(ctx, o, client.API(), client.Auth(), fn)
+		if serr := store.Flush(); serr != nil && ferr == nil {
+			return serr
+		}
+		return ferr
 	})
 	if err == nil {
 		err = fixMode(path)

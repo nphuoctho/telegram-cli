@@ -53,7 +53,7 @@ func newRootCmd() *cobra.Command {
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
 		return &config.UsageError{Msg: err.Error()}
 	})
-	root.AddCommand(newInitCmd(), newAuthCmd(), newMeCmd())
+	root.AddCommand(newInitCmd(), newAuthCmd(), newMeCmd(), newChatsCmd(), newMessagesCmd())
 	return root
 }
 
@@ -63,6 +63,7 @@ func exitCode(err error) (int, string) {
 	var nc *config.NotConfiguredError
 	var ar *tgclient.AuthRequiredError
 	var fw *tgclient.FloodWaitError
+	var pnf *tgclient.PeerNotFoundError
 	switch {
 	case err == nil:
 		return 0, ""
@@ -74,6 +75,8 @@ func exitCode(err error) (int, string) {
 		return 3, "NOT_CONFIGURED"
 	case errors.As(err, &ar):
 		return 4, "AUTH_REQUIRED"
+	case errors.As(err, &pnf):
+		return 5, "PEER_NOT_FOUND"
 	case errors.As(err, &fw):
 		return 6, "FLOOD_WAIT"
 	}

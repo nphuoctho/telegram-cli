@@ -222,7 +222,7 @@ for users. `username` is `""` when absent. `unread` appears only in `chats list`
 - `reply_to_id`, `media`, and `file` are omitted when empty. `file` appears only in
   `export --media` output and is relative to the export file.
 - `media.type` is `photo`, `video`, `audio`, `voice`, `document`, `sticker`, `gif`, or
-  `other` (location, poll, contact, and so on; then `file_name`/`size` are omitted).
+  `other` (location, poll, contact, and so on; then `file_name`/`size` are omitted). Link previews (web pages) are not media: `media` is omitted for them.
 - Service messages (joins, pins, title changes) have `"service": true` and `text` set to
   the action name, e.g. `"MessageActionChatAddUser"`.
 
@@ -231,7 +231,7 @@ Readable message format (used by `messages`, `watch`, and as a model for Markdow
 ```
 #1234  2025-11-16 14:02  Alice (@alice)  ↩1200
   Hello there
-  [photo] photo5012_2025-11-16_14-02-05.jpg (179.0 KiB)
+  [photo] photo5012_2025-11-16_14-02-05.jpg (178.9 KiB)
 ```
 
 ## 7. Command reference
@@ -425,7 +425,7 @@ Downloads the media of each listed message. Details in section 8.2.
 
 ```
 $ telegram-cli download @golang 1234 1240
-saved    ./1234_photo5012_2025-11-16_14-02-05.jpg  179.0 KiB
+saved    ./1234_photo5012_2025-11-16_14-02-05.jpg  178.9 KiB
 skipped  ./1240_slides.pdf  (exists)
 ```
 
