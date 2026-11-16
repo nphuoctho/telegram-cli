@@ -1,0 +1,78 @@
+{
+  "chat": {
+    "id": -1001,
+    "type": "supergroup",
+    "title": "Go Developers",
+    "username": "golang"
+  },
+  "exported_at": "2025-11-16T15:00:00Z",
+  "since": "2025-11-15T00:00:05Z",
+  "until": null,
+  "messages": [
+    {
+      "id": 1,
+      "chat_id": -1001,
+      "date": "2025-11-15T09:00:05Z",
+      "from": {
+        "id": 1,
+        "name": "Alice",
+        "username": "alice"
+      },
+      "out": false,
+      "text": "joined",
+      "service": true
+    },
+    {
+      "id": 2,
+      "chat_id": -1001,
+      "date": "2025-11-16T14:02:05Z",
+      "from": {
+        "id": 1,
+        "name": "Alice",
+        "username": "alice"
+      },
+      "out": false,
+      "text": "Hello *there*",
+      "media": {
+        "type": "photo",
+        "file_name": "p.jpg",
+        "size": 2048
+      },
+      "file": "go_media/2_p.jpg",
+      "service": false
+    },
+    {
+      "id": 3,
+      "chat_id": -1001,
+      "date": "2025-11-16T14:05:05Z",
+      "from": {
+        "id": 9,
+        "name": "",
+        "username": ""
+      },
+      "out": false,
+      "text": "re",
+      "reply_to_id": 2,
+      "media": {
+        "type": "document",
+        "file_name": "my slides.pdf",
+        "size": 2202009
+      },
+      "service": false
+    },
+    {
+      "id": 4,
+      "chat_id": -1001,
+      "date": "2025-11-16T14:06:05Z",
+      "from": null,
+      "out": false,
+      "text": "",
+      "media": {
+        "type": "document",
+        "file_name": "my slides.pdf"
+      },
+      "file": "go_media/4_my slides.pdf",
+      "service": false
+    }
+  ]
+}
