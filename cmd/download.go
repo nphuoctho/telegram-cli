@@ -63,7 +63,7 @@ func newDownloadCmd() *cobra.Command {
 					r := downloadResult{MessageID: id}
 					var found bool
 					for _, e := range elems {
-						if e.Msg.GetID() != id {
+						if e.Msg.GetID() != id { // the library already drops MessageEmpty
 							continue
 						}
 						found = true
@@ -73,10 +73,9 @@ func newDownloadCmd() *cobra.Command {
 							break
 						}
 						target := filepath.Join(dir, fmt.Sprintf("%d_%s", id, tgclient.SafeName(f.Name)))
-						size := output.NewMessage(e).Media
 						var total int64
-						if size != nil {
-							total = size.Size
+						if v, ok := output.NewMessage(e, nil); ok && v.Media != nil {
+							total = v.Media.Size
 						}
 						pr := output.NewProgress(c.ErrOrStderr(), filepath.Base(target))
 						err := tgclient.DownloadTo(ctx, s.API, f.Location, total, target, overwrite, pr.Update)
@@ -93,6 +92,12 @@ func newDownloadCmd() *cobra.Command {
 						case ctx.Err() != nil:
 							return ctx.Err()
 						default:
+							// Session and flood-wait failures end the command with their own exit code.
+							var ar *tgclient.AuthRequiredError
+							var fw *tgclient.FloodWaitError
+							if mapped := tgclient.MapError(err); errors.As(mapped, &ar) || errors.As(mapped, &fw) {
+								return mapped
+							}
 							r.Status, r.Path, r.Error = "error", "", err.Error()
 						}
 						break

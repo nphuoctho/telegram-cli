@@ -46,9 +46,17 @@ func SafeName(name string) string {
 		return r
 	}, name)
 	// Keep names within the common 255-byte file system limit, cutting on a rune boundary.
-	for len(name) > 200 {
-		_, n := utf8.DecodeLastRuneInString(name)
-		name = name[:len(name)-n]
+	if len(name) > 200 {
+		ext := filepath.Ext(name)
+		if len(ext) > 20 {
+			ext = ""
+		}
+		stem := name[:len(name)-len(ext)]
+		for len(stem)+len(ext) > 200 {
+			_, n := utf8.DecodeLastRuneInString(stem)
+			stem = stem[:len(stem)-n]
+		}
+		name = stem + ext
 	}
 	if name == "" || name == "." || name == ".." {
 		return "file"
