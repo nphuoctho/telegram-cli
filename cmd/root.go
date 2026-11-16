@@ -54,7 +54,25 @@ func newRootCmd() *cobra.Command {
 		return &config.UsageError{Msg: err.Error()}
 	})
 	root.AddCommand(newInitCmd(), newAuthCmd(), newMeCmd(), newChatsCmd(), newMessagesCmd(), newSendCmd(), newUploadCmd(), newDownloadCmd())
+	for _, c := range root.Commands() {
+		wrapArgs(c)
+	}
 	return root
+}
+
+// wrapArgs turns positional-arg count errors into usage errors (exit 2).
+func wrapArgs(c *cobra.Command) {
+	if a := c.Args; a != nil {
+		c.Args = func(cc *cobra.Command, args []string) error {
+			if err := a(cc, args); err != nil {
+				return &config.UsageError{Msg: err.Error()}
+			}
+			return nil
+		}
+	}
+	for _, sc := range c.Commands() {
+		wrapArgs(sc)
+	}
 }
 
 // exitCode maps an error to its exit code and error.code string.
