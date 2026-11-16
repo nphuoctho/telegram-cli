@@ -1,3 +1,6 @@
 /telegram-cli
 *.session
 .env
+session.json
+credentials.json
+peers.json
