@@ -73,9 +73,9 @@ func PrintChats(w io.Writer, chats []Chat) {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "ID\tTYPE\tUNREAD\tNAME")
 	for _, c := range chats {
-		name := c.Title
+		name := CleanLine(c.Title)
 		if c.Username != "" {
-			name += " (@" + c.Username + ")"
+			name += " (@" + CleanLine(c.Username) + ")"
 		}
 		unread := 0
 		if c.Unread != nil {

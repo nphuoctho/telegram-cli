@@ -79,9 +79,9 @@ func peerInfo(ctx context.Context, s *tgclient.Session, p tg.InputPeerClass) (st
 	if err != nil {
 		return "", 0, err
 	}
-	label := peer.VisibleName()
+	label := output.CleanLine(peer.VisibleName())
 	if u, ok := peer.Username(); ok {
-		label += " (@" + u + ")"
+		label += " (@" + output.CleanLine(u) + ")"
 	}
 	return label, int64(peer.TDLibPeerID()), nil
 }

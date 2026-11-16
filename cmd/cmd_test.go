@@ -164,3 +164,15 @@ func TestUnknownFlagIsUsage(t *testing.T) {
 	code, _, _ := exec(t, "", "init", "--nope")
 	require.Equal(t, 2, code)
 }
+
+func TestWrongArgCountExitsUsage(t *testing.T) {
+	setup(t)
+	for _, args := range [][]string{
+		{"send"}, {"send", "a", "b", "c"}, {"upload"}, {"download"}, {"export"}, {"export", "a", "b"},
+		{"messages", "read"}, {"messages", "search"}, {"chats", "list", "x"},
+		{"me", "x"}, {"init", "x"}, {"auth", "status", "x"},
+	} {
+		code, _, _ := exec(t, "", args...)
+		require.Equal(t, 2, code, "%v", args)
+	}
+}

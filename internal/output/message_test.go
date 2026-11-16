@@ -106,3 +106,18 @@ func TestNewMessageOwnWithoutFrom(t *testing.T) {
 	m, _ = NewMessage(e, nil)
 	require.Nil(t, m.From)
 }
+
+func TestReadablePrintersStripControlChars(t *testing.T) {
+	evil := "a\x1b[31mb\rc\x9d"
+	var b bytes.Buffer
+	PrintMessages(&b, []Message{{ID: 1, Date: time.Unix(1, 0), From: &Sender{Name: evil, Username: evil},
+		Text: evil + "\n\tok", Media: &Media{Type: "document", FileName: evil}}})
+	PrintMessages(&b, []Message{{ID: 2, Date: time.Unix(1, 0), Service: true, Text: evil}})
+	u := 1
+	PrintChats(&b, []Chat{{ID: 1, Type: "user", Title: evil, Username: evil, Unread: &u}})
+	out := b.String()
+	require.NotContains(t, out, "\x1b")
+	require.NotContains(t, out, "\r")
+	require.NotContains(t, out, "\x9d")
+	require.Contains(t, out, "a\uFFFD[31mb\uFFFDc\uFFFD\n  \tok")
+}

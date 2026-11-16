@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -164,4 +165,87 @@ func TestWatchCtrlCDuringChatResolutionExits0(t *testing.T) {
 	code, out, errS := runCancelable(t, cancel, ctx, "watch", "@gophers")
 	require.Equal(t, 0, code, errS)
 	require.Empty(t, out+errS)
+}
+
+func TestWatchSanitisesUntrustedText(t *testing.T) {
+	setup(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	old := runWatch
+	t.Cleanup(func() { runWatch = old })
+	runWatch = func(ctx context.Context, _ *cobra.Command, d *tg.UpdateDispatcher, fn func(context.Context, *tgclient.Session) error) error {
+		_ = fn(ctx, nil)
+		err := d.Handle(ctx, &tg.Updates{
+			Updates: []tg.UpdateClass{&tg.UpdateNewChannelMessage{Message: &tg.Message{
+				ID: 6, Date: 1763276525, Message: "x\x1b[2Jhi", PeerID: &tg.PeerChannel{ChannelID: 77},
+				FromID: &tg.PeerUser{UserID: 5},
+			}}},
+			Users: []tg.UserClass{&tg.User{ID: 5, FirstName: "Bob\x1b]0;pwn\a", AccessHash: 1}},
+			Chats: []tg.ChatClass{&tg.Channel{ID: 77, Title: "Evil\x1b]0;pwn\x07\nFAKE", Photo: &tg.ChatPhotoEmpty{}}},
+		})
+		require.NoError(t, err)
+		cancel()
+		return ctx.Err()
+	}
+	code, out, errS := runCancelable(t, cancel, ctx, "watch")
+	require.Equal(t, 0, code, errS)
+	require.NotContains(t, out, "\x1b")
+	require.NotContains(t, out, "\a")
+	require.True(t, strings.HasPrefix(out, "[Evil"), out)
+	require.Equal(t, 1, strings.Count(strings.SplitN(out, "#6", 2)[0], "\n"), out) // header is one line
+}
+
+func TestWatchBadFlagExit2(t *testing.T) {
+	setup(t)
+	code, _, _ := exec(t, "", "watch", "--bogus")
+	require.Equal(t, 2, code)
+}
+
+func TestWatchOutgoingPrivateMessageHasSelfSender(t *testing.T) {
+	setup(t)
+	m := tgmock.NewRequire(t)
+	m.ExpectCall(selfReq).ThenResult(alice())
+	ctx, cancel := context.WithCancel(context.Background())
+	old := runWatch
+	t.Cleanup(func() { runWatch = old })
+	runWatch = func(ctx context.Context, _ *cobra.Command, d *tg.UpdateDispatcher, fn func(context.Context, *tgclient.Session) error) error {
+		s := sessionOver(m)
+		require.NoError(t, s.Peers.Init(ctx))
+		if err := fn(ctx, s); err != nil {
+			return err
+		}
+		feed(t, d, &tg.UpdateNewMessage{Message: &tg.Message{
+			ID: 9, Date: 1763276525, Message: "mine", Out: true, PeerID: &tg.PeerUser{UserID: 42},
+		}})
+		cancel()
+		return ctx.Err()
+	}
+	code, out, errS := runCancelable(t, cancel, ctx, "watch", "--json")
+	require.Equal(t, 0, code, errS)
+	require.Contains(t, out, `"from":{"id":123456789,"name":"Alice Liddell","username":"alice"}`)
+	require.Contains(t, out, `"out":true`)
+}
+
+type brokenPipe struct{}
+
+func (brokenPipe) Write([]byte) (int, error) { return 0, errors.New("write: broken pipe") }
+
+func TestWatchClosedStdoutStopsCleanly(t *testing.T) {
+	for _, args := range [][]string{{"watch"}, {"watch", "--json"}} {
+		setup(t)
+		old := runWatch
+		runWatch = func(ctx context.Context, _ *cobra.Command, d *tg.UpdateDispatcher, fn func(context.Context, *tgclient.Session) error) error {
+			_ = fn(ctx, nil)
+			feed(t, d, twoUpdates()...)
+			<-ctx.Done() // only the write failure can end the watch
+			return ctx.Err()
+		}
+		root := newRootCmd()
+		var errB bytes.Buffer
+		root.SetArgs(args)
+		root.SetOut(brokenPipe{})
+		root.SetErr(&errB)
+		require.Equal(t, 0, run(context.Background(), root, &errB), errB.String())
+		require.Empty(t, errB.String())
+		runWatch = old
+	}
 }

@@ -528,8 +528,10 @@ goes to stdout, so `--json` output stays clean.
 - `--media`: downloads attachments into `<output-stem>_media/` next to the output file,
   using the download naming and sanitizing rules from 8.2. Existing files are skipped, so a
   re-run only fetches what is missing. Because chats can be private, the media directory
-  is created 0700 and its files are written 0600, like the export file (unlike `download`). A failed attachment download is a warning on stderr,
-  leaves `file` unset for that message, and does not fail the export.
+  is created 0700 and its files are written 0600, like the export file (unlike `download`). A failed attachment download is a warning on
+  stderr (control characters replaced), leaves `file` unset for that message, and does not
+  fail the export. Files already downloaded stay in the media directory if the export
+  itself later fails or is interrupted; only the output file is all-or-nothing.
 
 JSON format:
 
@@ -563,9 +565,16 @@ Hello there
 [document: slides.pdf, 2.1 MiB]
 ```
 
-Rules: one `##` heading per local calendar day; message text is written as-is (not
-escaped); images use `![...](path)`, other files use `[name](path)` when downloaded, and
-`[type: name, size]` when not; service messages are written as `*Alice: MessageActionChatAddUser*`.
+Rules: one `##` heading per local calendar day; images use `![type](path)`, other files
+use `[name](path)` when downloaded, and `[type: name, size]` when not; service messages are
+written as `*Alice: MessageActionChatAddUser*`. A chat with no title gets the heading
+`# Chat <id>`.
+
+Text from Telegram is untrusted, so the file cannot be forged by it: control characters
+are replaced with U+FFFD, names, titles, file names and service text get Markdown
+punctuation backslash-escaped, link targets are percent-encoded, and every line of a
+message body is written as a block quote (`> `) with `<` and `[` escaped. A message cannot
+start a heading or a fake message header.
 
 ## 10. Error handling
 

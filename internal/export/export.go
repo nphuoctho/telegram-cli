@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -136,6 +137,9 @@ func DownloadMedia(ctx context.Context, api *tg.Client, elems []messages.Elem, m
 		target := filepath.Join(dir, name)
 		err := os.MkdirAll(dir, 0o700)
 		if err == nil {
+			err = os.Chmod(dir, 0o700) // also for a directory left by an earlier run
+		}
+		if err == nil {
 			err = tgclient.DownloadTo(ctx, api, f.Location, m.Media.Size, target, 0o600, false, nil)
 		}
 		switch {
@@ -145,7 +149,7 @@ func DownloadMedia(ctx context.Context, api *tg.Client, elems []messages.Elem, m
 		case ctx.Err() != nil:
 			return files, ctx.Err()
 		default:
-			fmt.Fprintf(warn, "warning: message %d: download failed: %v\n", m.ID, err)
+			fmt.Fprintf(warn, "warning: message %d: download failed: %s\n", m.ID, output.CleanLine(err.Error()))
 		}
 	}
 	return files, nil
@@ -171,14 +175,39 @@ func WriteJSON(w io.Writer, d Doc) error {
 	return enc.Encode(d)
 }
 
-var linkEsc = strings.NewReplacer(" ", "%20", "(", "%28", ")", "%29")
+var mdEsc = strings.NewReplacer(
+	`\`, `\\`, "`", "\\`", "*", `\*`, "_", `\_`, "[", `\[`, "]", `\]`, "(", `\(`, ")", `\)`,
+	"<", `\<`, ">", `\>`, "#", `\#`, "|", `\|`, "&", `\&`, "!", `\!`,
+)
 
-// WriteMarkdown renders d per spec section 9.
+// mdLine makes untrusted single-line text safe inside a Markdown line.
+func mdLine(s string) string { return mdEsc.Replace(output.CleanLine(s)) }
+
+// mdPath percent-encodes a relative path for use as a link target.
+func mdPath(p string) string {
+	return strings.NewReplacer("(", "%28", ")", "%29").Replace((&url.URL{Path: p}).EscapedPath())
+}
+
+// mdQuote puts every line of a message body in a block quote, so text from other
+// users cannot start a heading, header line or list at the top level of the file.
+func mdQuote(s string) string {
+	lines := strings.Split(output.CleanText(strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\r", "\n")), "\n")
+	for i, l := range lines {
+		l = strings.NewReplacer("<", `\<`, "[", `\[`).Replace(l) // no raw HTML or links
+		lines[i] = strings.TrimRight("> "+l, " ")
+	}
+	return strings.Join(lines, "\n")
+}
+
+// WriteMarkdown renders d per spec section 9. All text from Telegram is escaped or quoted.
 func WriteMarkdown(w io.Writer, d Doc) error {
 	var b strings.Builder
-	title := d.Chat.Title
+	title := mdLine(d.Chat.Title)
+	if title == "" {
+		title = fmt.Sprintf("Chat %d", d.Chat.ID)
+	}
 	if d.Chat.Username != "" {
-		title += " (@" + d.Chat.Username + ")"
+		title += " (@" + mdLine(d.Chat.Username) + ")"
 	}
 	fmt.Fprintf(&b, "# %s\n\nExported %s · %d messages", title, d.ExportedAt.Format("2006-01-02 15:04"), len(d.Messages))
 	if n := len(d.Messages); n > 0 {
@@ -194,12 +223,12 @@ func WriteMarkdown(w io.Writer, d Doc) error {
 		}
 		name := "Unknown"
 		if f := m.From; f != nil {
-			if name = f.Name; name == "" {
+			if name = mdLine(f.Name); name == "" {
 				name = "id " + strconv.FormatInt(f.ID, 10)
 			}
 		}
 		if m.Service {
-			fmt.Fprintf(&b, "\n*%s: %s*\n", name, m.Text)
+			fmt.Fprintf(&b, "\n*%s: %s*\n", name, mdLine(m.Text))
 			continue
 		}
 		fmt.Fprintf(&b, "\n**%s** · %s · #%d", name, t.Format("15:04"), m.ID)
@@ -208,22 +237,22 @@ func WriteMarkdown(w io.Writer, d Doc) error {
 		}
 		b.WriteString("\n")
 		if m.Text != "" {
-			b.WriteString("\n" + m.Text + "\n")
+			b.WriteString("\n" + mdQuote(m.Text) + "\n")
 		}
 		if md := m.Media; md != nil {
-			label := md.Type
+			label := mdLine(md.Type)
 			if md.FileName != "" {
-				label = md.FileName
+				label = mdLine(md.FileName)
 			}
 			switch {
 			case m.File != "" && md.Type == "photo":
-				fmt.Fprintf(&b, "\n![%s](%s)\n", md.Type, linkEsc.Replace(m.File))
+				fmt.Fprintf(&b, "\n![%s](%s)\n", md.Type, mdPath(m.File))
 			case m.File != "":
-				fmt.Fprintf(&b, "\n[%s](%s)\n", label, linkEsc.Replace(m.File))
+				fmt.Fprintf(&b, "\n[%s](%s)\n", label, mdPath(m.File))
 			default:
-				desc := md.Type
+				desc := mdLine(md.Type)
 				if md.FileName != "" {
-					desc += ": " + md.FileName
+					desc += ": " + mdLine(md.FileName)
 				}
 				if md.Size > 0 {
 					desc += ", " + output.Size(md.Size)
